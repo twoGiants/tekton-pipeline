@@ -402,7 +402,7 @@ func errorIfStepArtifactReferencedInField(value, fieldName string) (errs *apis.F
 	return errs
 }
 
-func validateSidecar(errs *apis.FieldError, sc Sidecar) *apis.FieldError {
+func (sc *Sidecar) Validate(ctx context.Context) (errs *apis.FieldError) {
 	if sc.Name == pipeline.ReservedResultsSidecarName {
 		errs = errs.Also(&apis.FieldError{
 			Message: fmt.Sprintf("Invalid: cannot use reserved sidecar name %v ", sc.Name),
