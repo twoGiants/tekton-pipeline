@@ -61,8 +61,24 @@ func (e *TaskNotFoundError) Error() string {
 	return fmt.Sprintf("Couldn't retrieve Task %q: %s", e.Name, e.Msg)
 }
 
-// ResolvedPipelineTask contains a PipelineTask and its associated TaskRun(s) or CustomRuns, if they exist.
+// TODO(twoGiants): move out?
+// ResolvedPipeline contains the data that is needed to execute
+// the PipelineRun.
+type ResolvedPipeline struct {
+	PipelineName string
+	Kind         string
+	PipelineSpec *v1.PipelineSpec
+}
+
+// TODO(twoGiants): move out
+type GetPipelineRun func(name string) (*v1.PipelineRun, error)
+
+// ResolvedPipelineTask contains a PipelineTask and its associated child PipelineRun(s) (Pipelines-in-Pipelines), TaskRun(s) or CustomRuns, if they exist.
 type ResolvedPipelineTask struct {
+	ChildPipelineRunNames []string
+	ChildPipelineRuns     []*v1.PipelineRun
+	ResolvedPipeline      ResolvedPipeline
+
 	TaskRunNames []string
 	TaskRuns     []*v1.TaskRun
 	ResolvedTask *resources.ResolvedTask
@@ -593,6 +609,7 @@ func ValidateTaskRunSpecs(p *v1.PipelineSpec, pr *v1.PipelineRun) error {
 func ResolvePipelineTask(
 	ctx context.Context,
 	pipelineRun v1.PipelineRun,
+	getChildPipelineRun GetPipelineRun,
 	getTask resources.GetTask,
 	getTaskRun resources.GetTaskRun,
 	getRun GetRun,
@@ -617,7 +634,23 @@ func ResolvePipelineTask(
 	if rpt.PipelineTask.IsMatrixed() {
 		numCombinations = rpt.PipelineTask.Matrix.CountCombinations()
 	}
-	if rpt.IsCustomTask() {
+
+	// Is PipelineTask a Pipeline?
+	if rpt.PipelineTask.PipelineSpec != nil /*|| rpt.PipelineTask.PipelineRef != nil*/ {
+		// happy path: we have only one name
+		rpt.ChildPipelineRunNames = GetNamesOfChildPipelineRuns(
+			pipelineRun.Status.ChildReferences,
+			pipelineTask.Name,
+			pipelineRun.Name,
+			numCombinations,
+		)
+		// happy path: no pipelineRef, no local/remote resolution, no getPipeline
+		for _, childPipelineRunName := range rpt.ChildPipelineRunNames {
+			if err := rpt.setChildPipelineRunsAndResolvedPipeline(ctx, childPipelineRunName, getChildPipelineRun, pipelineTask); err != nil {
+				return nil, err
+			}
+		}
+	} else if rpt.IsCustomTask() {
 		rpt.CustomRunNames = getNamesOfCustomRuns(pipelineRun.Status.ChildReferences, pipelineTask.Name, pipelineRun.Name, numCombinations)
 		for _, runName := range rpt.CustomRunNames {
 			run, err := getRun(runName)
@@ -638,6 +671,35 @@ func ResolvePipelineTask(
 	}
 
 	return &rpt, nil
+}
+
+func (t *ResolvedPipelineTask) setChildPipelineRunsAndResolvedPipeline(
+	ctx context.Context,
+	childPipelineRunName string,
+	getChildPipelineRun GetPipelineRun,
+	pipelineTask v1.PipelineTask,
+) error {
+	childPipelineRun, err := getChildPipelineRun(childPipelineRunName)
+	if err != nil {
+		if !kerrors.IsNotFound(err) {
+			return fmt.Errorf("error retrieving child PipelineRun %s: %w", childPipelineRunName, err)
+		}
+	}
+	if childPipelineRun != nil {
+		t.ChildPipelineRuns = append(t.ChildPipelineRuns, childPipelineRun)
+	}
+
+	rp := ResolvedPipeline{}
+	if pipelineTask.PipelineSpec != nil {
+		rp.PipelineSpec = pipelineTask.PipelineSpec
+	} else if pipelineTask.PipelineRef != nil {
+		return fmt.Errorf("PipelineRef for PipelineTask %q is not yet implemented", pipelineTask.Name)
+	} else {
+		return fmt.Errorf("PipelineSpec in PipelineTask %q missing", pipelineTask.Name)
+	}
+
+	t.ResolvedPipeline = rp
+	return nil
 }
 
 // setTaskRunsAndResolvedTask fetches the named TaskRun using the input function getTaskRun,
@@ -740,6 +802,13 @@ func GetNamesOfTaskRuns(childRefs []v1.ChildStatusReference, ptName, prName stri
 	return getNewRunNames(ptName, prName, numberOfTaskRuns)
 }
 
+func GetNamesOfChildPipelineRuns(childRefs []v1.ChildStatusReference, ptName, prName string, numberOfPipelineRuns int) []string {
+	if pipelineRunNames := getChildPipelineRunNamesFromChildRefs(childRefs, ptName); pipelineRunNames != nil {
+		return pipelineRunNames
+	}
+	return getNewRunNames(ptName, prName, numberOfPipelineRuns)
+}
+
 // getTaskRunNamesFromChildRefs returns the names of TaskRuns defined in childRefs that are associated with the named Pipeline Task.
 func getTaskRunNamesFromChildRefs(childRefs []v1.ChildStatusReference, ptName string) []string {
 	var taskRunNames []string
@@ -753,25 +822,27 @@ func getTaskRunNamesFromChildRefs(childRefs []v1.ChildStatusReference, ptName st
 
 func getNewRunNames(ptName, prName string, numberOfRuns int) []string {
 	var runNames []string
-	// If it is a singular TaskRun/CustomRun, we only append the ptName
+	// If it is a singular PipelineRun/TaskRun/CustomRun, we only append the ptName
 	if numberOfRuns == 1 {
 		runName := kmeta.ChildName(prName, "-"+ptName)
 		return append(runNames, runName)
 	}
-	// For a matrix we append i to the end of the fanned out TaskRuns/CustomRun "matrixed-pr-taskrun-0"
+
+	// For a matrix we append i to the end of the fanned out PipelineRun/TaskRun/CustomRun "matrixed-pr-taskrun-0"
 	for i := range numberOfRuns {
 		runName := kmeta.ChildName(prName, fmt.Sprintf("-%s-%d", ptName, i))
-		// check if the taskRun name ends with a matrix instance count
+		// check if the PipelineRun/TaskRun/CustomRun name ends with a matrix instance count
 		if !strings.HasSuffix(runName, fmt.Sprintf("-%d", i)) {
 			runName = kmeta.ChildName(prName, "-"+ptName)
 			// kmeta.ChildName limits the size of a name to max of 63 characters based on k8s guidelines
-			// truncate the name such that "-<matrix-id>" can be appended to the TaskRun/CustomRun name
+			// truncate the name such that "-<matrix-id>" can be appended to the PipelineRun/TaskRun/CustomRun name
 			longest := 63 - len(fmt.Sprintf("-%d", numberOfRuns))
 			runName = runName[0:longest]
 			runName = fmt.Sprintf("%s-%d", runName, i)
 		}
 		runNames = append(runNames, runName)
 	}
+
 	return runNames
 }
 
@@ -809,6 +880,19 @@ func getRunNamesFromChildRefs(childRefs []v1.ChildStatusReference, ptName string
 		}
 	}
 	return runNames
+}
+
+// ...
+func getChildPipelineRunNamesFromChildRefs(childRefs []v1.ChildStatusReference, ptName string) []string {
+	var childPipelineRunNames []string
+	for _, cr := range childRefs {
+		if cr.PipelineTaskName == ptName {
+			if cr.Kind == pipeline.PipelineRunControllerName {
+				childPipelineRunNames = append(childPipelineRunNames, cr.Name)
+			}
+		}
+	}
+	return childPipelineRunNames
 }
 
 func (t *ResolvedPipelineTask) hasResultReferences() bool {

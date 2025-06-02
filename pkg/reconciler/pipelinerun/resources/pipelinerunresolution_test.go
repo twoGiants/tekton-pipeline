@@ -59,6 +59,10 @@ func nopGetTaskRun(string) (*v1.TaskRun, error) {
 	return nil, errors.New("GetTaskRun should not be called")
 }
 
+func nopGetPipelineRun(string) (*v1.PipelineRun, error) {
+	return nil, errors.New("GetPipelineRun should not be called")
+}
+
 var pts = []v1.PipelineTask{{
 	Name:    "mytask1",
 	TaskRef: &v1.TaskRef{Name: "task"},
@@ -2382,7 +2386,7 @@ func TestResolvePipelineRun_CustomTask(t *testing.T) {
 	cfg := config.NewStore(logtesting.TestLogger(t))
 	ctx = cfg.ToContext(ctx)
 	for _, task := range pts {
-		ps, err := ResolvePipelineTask(ctx, pr, nopGetTask, nopGetTaskRun, getRun, task, nil)
+		ps, err := ResolvePipelineTask(ctx, pr, nopGetPipelineRun, nopGetTask, nopGetTaskRun, getRun, task, nil)
 		if err != nil {
 			t.Fatalf("ResolvePipelineTask: %v", err)
 		}
@@ -2433,7 +2437,7 @@ func TestResolvePipelineRun_PipelineTaskHasNoResources(t *testing.T) {
 	}
 	pipelineState := PipelineRunState{}
 	for _, task := range pts {
-		ps, err := ResolvePipelineTask(context.Background(), pr, getTask, getTaskRun, nopGetCustomRun, task, nil)
+		ps, err := ResolvePipelineTask(context.Background(), pr, nopGetPipelineRun, getTask, getTaskRun, nopGetCustomRun, task, nil)
 		if err != nil {
 			t.Errorf("Error getting tasks for fake pipeline %s: %s", p.ObjectMeta.Name, err)
 		}
@@ -2470,7 +2474,7 @@ func TestResolvePipelineRun_PipelineTaskHasPipelineRef(t *testing.T) {
 		},
 	}
 
-	_, err := ResolvePipelineTask(context.Background(), pr, getTask, getTaskRun, nopGetCustomRun, pt, nil)
+	_, err := ResolvePipelineTask(context.Background(), pr, nopGetPipelineRun, getTask, getTaskRun, nopGetCustomRun, pt, nil)
 	if err == nil {
 		t.Errorf("Error getting tasks for fake pipeline %s, expected an error but got nil.", p.ObjectMeta.Name)
 	}
@@ -2522,7 +2526,7 @@ func TestResolvePipelineRun_TaskDoesntExist(t *testing.T) {
 		},
 	}
 	for _, pt := range pts {
-		_, err := ResolvePipelineTask(context.Background(), pr, getTask, getTaskRun, nopGetCustomRun, pt, nil)
+		_, err := ResolvePipelineTask(context.Background(), pr, nopGetPipelineRun, getTask, getTaskRun, nopGetCustomRun, pt, nil)
 		var tnf *TaskNotFoundError
 		switch {
 		case err == nil:
@@ -2566,7 +2570,7 @@ func TestResolvePipelineRun_VerificationFailed(t *testing.T) {
 		},
 	}
 	for _, pt := range pts {
-		rt, _ := ResolvePipelineTask(context.Background(), pr, getTask, getTaskRun, nopGetCustomRun, pt, nil)
+		rt, _ := ResolvePipelineTask(context.Background(), pr, nopGetPipelineRun, getTask, getTaskRun, nopGetCustomRun, pt, nil)
 		if d := cmp.Diff(verificationResult, rt.ResolvedTask.VerificationResult, cmpopts.EquateErrors()); d != "" {
 			t.Error(diff.PrintWantGot(d))
 		}
@@ -2588,7 +2592,7 @@ func TestResolvePipelineRun_TransientError(t *testing.T) {
 			Name: "pipelinerun",
 		},
 	}
-	_, err := ResolvePipelineTask(context.Background(), pr, getTask, getTaskRun, nopGetCustomRun, pt, nil)
+	_, err := ResolvePipelineTask(context.Background(), pr, nopGetPipelineRun, getTask, getTaskRun, nopGetCustomRun, pt, nil)
 	if !resolutioncommon.IsErrTransient(err) {
 		t.Error("Transient error while getting Task did not result in a transient error")
 	}
@@ -2831,7 +2835,7 @@ func TestResolvePipeline_WhenExpressions(t *testing.T) {
 	}
 
 	t.Run("When Expressions exist", func(t *testing.T) {
-		_, err := ResolvePipelineTask(context.Background(), pr, getTask, getTaskRun, nopGetCustomRun, pt, nil)
+		_, err := ResolvePipelineTask(context.Background(), pr, nopGetPipelineRun, getTask, getTaskRun, nopGetCustomRun, pt, nil)
 		if err != nil {
 			t.Fatalf("Did not expect error when resolving PipelineRun: %v", err)
 		}
@@ -2933,7 +2937,7 @@ func TestIsCustomTask(t *testing.T) {
 			ctx := context.Background()
 			cfg := config.NewStore(logtesting.TestLogger(t))
 			ctx = cfg.ToContext(ctx)
-			rpt, err := ResolvePipelineTask(ctx, pr, getTask, getTaskRun, getRun, tc.pt, nil)
+			rpt, err := ResolvePipelineTask(ctx, pr, nopGetPipelineRun, getTask, getTaskRun, getRun, tc.pt, nil)
 			if err != nil {
 				t.Fatalf("Did not expect error when resolving PipelineRun: %v", err)
 			}
@@ -3681,7 +3685,7 @@ func TestIsMatrixed(t *testing.T) {
 				},
 			})
 			ctx = cfg.ToContext(ctx)
-			rpt, err := ResolvePipelineTask(ctx, pr, getTask, getTaskRun, getRun, tc.pt, nil)
+			rpt, err := ResolvePipelineTask(ctx, pr, nopGetPipelineRun, getTask, getTaskRun, getRun, tc.pt, nil)
 			if err != nil {
 				t.Fatalf("Did not expect error when resolving PipelineRun: %v", err)
 			}
@@ -3840,7 +3844,7 @@ func TestResolvePipelineRunTask_WithMatrix(t *testing.T) {
 				},
 			})
 			ctx = cfg.ToContext(ctx)
-			rpt, err := ResolvePipelineTask(ctx, pr, getTask, getTaskRun, getRun, tc.pt, tc.pst)
+			rpt, err := ResolvePipelineTask(ctx, pr, nopGetPipelineRun, getTask, getTaskRun, getRun, tc.pt, tc.pst)
 			if err != nil {
 				t.Fatalf("Did not expect error when resolving PipelineRun: %v", err)
 			}
@@ -4008,7 +4012,7 @@ func TestResolvePipelineRunTask_WithMatrixedCustomTask(t *testing.T) {
 			if tc.getRun == nil {
 				tc.getRun = getRun
 			}
-			rpt, err := ResolvePipelineTask(ctx, pr, getTask, getTaskRun, tc.getRun, tc.pt, tc.pst)
+			rpt, err := ResolvePipelineTask(ctx, pr, nopGetPipelineRun, getTask, getTaskRun, tc.getRun, tc.pt, tc.pst)
 			if err != nil {
 				t.Fatalf("Did not expect error when resolving PipelineRun: %v", err)
 			}
