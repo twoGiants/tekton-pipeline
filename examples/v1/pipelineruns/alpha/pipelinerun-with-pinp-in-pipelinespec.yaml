@@ -1,0 +1,23 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: pip-parent
+spec:
+  tasks:
+    - name: pip-child
+      pipelineSpec:
+        tasks:
+          - name: pip-child-task
+            taskSpec:
+              steps:
+                - name: hello-pip
+                  image: mirror.gcr.io/alpine
+                  script: echo "Hello from pip!"
+---
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: pip-parent-run-
+spec:
+  pipelineRef:
+    name: pip-parent
