@@ -3822,6 +3822,92 @@ func TestPipelineRunState_GetTaskRunsArtifacts(t *testing.T) {
 }
 
 func TestPipelineRunState_GetChildReferences(t *testing.T) {
+	resolvedTask := &ResolvedPipelineTask{
+		TaskRunNames: []string{"single-task-run"},
+		PipelineTask: &v1.PipelineTask{
+			Name:        "single-task-1",
+			DisplayName: "Single Task 1",
+			TaskRef: &v1.TaskRef{
+				Name:       "single-task",
+				Kind:       "Task",
+				APIVersion: "v1",
+			}},
+		TaskRuns: []*v1.TaskRun{{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+			ObjectMeta: metav1.ObjectMeta{Name: "single-task-run"},
+		}},
+	}
+	childRefForTask := v1.ChildStatusReference{
+		TypeMeta: runtime.TypeMeta{
+			APIVersion: "tekton.dev/v1",
+			Kind:       "TaskRun",
+		},
+		Name:             "single-task-run",
+		PipelineTaskName: "single-task-1",
+		DisplayName:      "Single Task 1",
+	}
+
+	resolvedCustomTask := &ResolvedPipelineTask{
+		CustomRunNames: []string{"single-custom-task-run"},
+		CustomTask:     true,
+		PipelineTask: &v1.PipelineTask{
+			Name:        "single-custom-task-1",
+			DisplayName: "Single Custom Task 1",
+			TaskRef: &v1.TaskRef{
+				APIVersion: "example.dev/v0",
+				Kind:       "Example",
+				Name:       "single-custom-task",
+			}},
+		CustomRuns: []*v1beta1.CustomRun{{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1beta1"},
+			ObjectMeta: metav1.ObjectMeta{Name: "single-custom-task-run"},
+		}},
+	}
+	childRefForCustomTask := v1.ChildStatusReference{
+		TypeMeta: runtime.TypeMeta{
+			APIVersion: "tekton.dev/v1beta1",
+			Kind:       "CustomRun",
+		},
+		Name:             "single-custom-task-run",
+		PipelineTaskName: "single-custom-task-1",
+		DisplayName:      "Single Custom Task 1",
+	}
+
+	resolvedChildPipeline := &ResolvedPipelineTask{
+		ChildPipelineRunNames: []string{"single-child-pipeline-run"},
+		PipelineTask: &v1.PipelineTask{
+			Name:        "single-child-pipeline-1",
+			DisplayName: "Human readable name for single-child-pipeline-1 with $(params.foobar)",
+			PipelineSpec: &v1.PipelineSpec{
+				Tasks: []v1.PipelineTask{{
+					Name: "single-child-pipeline-1-task",
+				}}},
+			Params: v1.Params{{
+				Name:  "foobar",
+				Value: v1.ParamValue{Type: "string", StringVal: "foo"},
+			}},
+		},
+		ChildPipelineRuns: []*v1.PipelineRun{{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
+			ObjectMeta: metav1.ObjectMeta{Name: "single-child-pipeline-run"},
+			Spec: v1.PipelineRunSpec{
+				Params: v1.Params{{
+					Name:  "foobar",
+					Value: v1.ParamValue{Type: "string", StringVal: "foo"},
+				}},
+			},
+		}},
+	}
+	childRefForChildPipeline := v1.ChildStatusReference{
+		TypeMeta: runtime.TypeMeta{
+			APIVersion: "tekton.dev/v1",
+			Kind:       "PipelineRun",
+		},
+		Name:             "single-child-pipeline-run",
+		PipelineTaskName: "single-child-pipeline-1",
+		DisplayName:      "Human readable name for single-child-pipeline-1 with foo",
+	}
+
 	testCases := []struct {
 		name      string
 		state     PipelineRunState
@@ -3901,8 +3987,7 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 					Values:   []string{"foo", "bar"},
 				}},
 			}},
-		},
-		{
+		}, {
 			name: "single-custom-task",
 			state: PipelineRunState{{
 				CustomRunNames: []string{"single-custom-task-run"},
@@ -3941,61 +4026,32 @@ func TestPipelineRunState_GetChildReferences(t *testing.T) {
 					Values:   []string{"foo", "bar"},
 				}},
 			}},
-		},
-		{
+		}, {
+			name:      "single-child-pipeline",
+			state:     PipelineRunState{resolvedChildPipeline},
+			childRefs: []v1.ChildStatusReference{childRefForChildPipeline},
+		}, {
 			name: "task-and-custom-task",
-			state: PipelineRunState{{
-				TaskRunNames: []string{"single-task-run"},
-				PipelineTask: &v1.PipelineTask{
-					Name:        "single-task-1",
-					DisplayName: "Single Task 1",
-					TaskRef: &v1.TaskRef{
-						Name:       "single-task",
-						Kind:       "Task",
-						APIVersion: "v1",
-					},
-				},
-				TaskRuns: []*v1.TaskRun{{
-					TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1"},
-					ObjectMeta: metav1.ObjectMeta{Name: "single-task-run"},
-				}},
-			}, {
-				CustomRunNames: []string{"single-custom-task-run"},
-				CustomTask:     true,
-				PipelineTask: &v1.PipelineTask{
-					Name:        "single-custom-task-1",
-					DisplayName: "Single Custom Task 1",
-					TaskRef: &v1.TaskRef{
-						APIVersion: "example.dev/v0",
-						Kind:       "Example",
-						Name:       "single-custom-task",
-					},
-				},
-				CustomRuns: []*v1beta1.CustomRun{
-					{
-						TypeMeta:   metav1.TypeMeta{APIVersion: "tekton.dev/v1beta1"},
-						ObjectMeta: metav1.ObjectMeta{Name: "single-custom-task-run"},
-					}},
-			}},
-			childRefs: []v1.ChildStatusReference{{
-				TypeMeta: runtime.TypeMeta{
-					APIVersion: "tekton.dev/v1",
-					Kind:       "TaskRun",
-				},
-				Name:             "single-task-run",
-				PipelineTaskName: "single-task-1",
-				DisplayName:      "Single Task 1",
-			}, {
-				TypeMeta: runtime.TypeMeta{
-					APIVersion: "tekton.dev/v1beta1",
-					Kind:       "CustomRun",
-				},
-				Name:             "single-custom-task-run",
-				PipelineTaskName: "single-custom-task-1",
-				DisplayName:      "Single Custom Task 1",
-			}},
-		},
-		{
+			state: PipelineRunState{
+				resolvedTask,
+				resolvedCustomTask,
+			},
+			childRefs: []v1.ChildStatusReference{
+				childRefForTask,
+				childRefForCustomTask,
+			}}, {
+			name: "task-and-custom-task-and-child-pipeline",
+			state: PipelineRunState{
+				resolvedTask,
+				resolvedCustomTask,
+				resolvedChildPipeline,
+			},
+			childRefs: []v1.ChildStatusReference{
+				childRefForTask,
+				childRefForCustomTask,
+				childRefForChildPipeline,
+			},
+		}, {
 			name: "unresolved-matrixed-task",
 			state: PipelineRunState{{
 				TaskRunNames: []string{"task-run-0", "task-run-1", "task-run-2", "task-run-3"},
