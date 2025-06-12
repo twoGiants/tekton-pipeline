@@ -281,6 +281,24 @@ func TestIsBeforeFirstTaskRun_WithSucceededMatrixedTask(t *testing.T) {
 	}
 }
 
+func TestIsBeforeFirstTaskRun_WithNotStartedChildPipeline(t *testing.T) {
+	if !noneStartedChildPipelineRunState.IsBeforeFirstTaskRun() {
+		t.Fatalf("Expected state to be before first child pipelinerun")
+	}
+}
+
+func TestIsBeforeFirstTaskRun_WithStartedChildPipeline(t *testing.T) {
+	if oneChildPipelineRunStartedState.IsBeforeFirstTaskRun() {
+		t.Fatalf("Expected state to be after first child pipelinerun")
+	}
+}
+
+func TestIsBeforeFirstTaskRun_WithFinalScheduledChildPipeline(t *testing.T) {
+	if finalChildPipelineRunsScheduledState.IsBeforeFirstTaskRun() {
+		t.Fatalf("Expected state to be after first child pipelinerun")
+	}
+}
+
 func TestGetNextTasks(t *testing.T) {
 	tcs := []struct {
 		name         string
