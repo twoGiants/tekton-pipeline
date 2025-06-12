@@ -961,7 +961,7 @@ func (c *Reconciler) runNextSchedulableTask(ctx context.Context, pr *v1.Pipeline
 		}
 
 		switch {
-		case rpt.PipelineTask.PipelineSpec != nil:
+		case rpt.IsChildPipeline():
 			rpt.ChildPipelineRuns, err = c.createChildPipelineRuns(ctx, rpt, pr, pipelineRunFacts)
 			if err != nil {
 				recorder.Eventf(pr, corev1.EventTypeWarning, "ChildPipelineRunsCreationFailed", "Failed to create child (PIP) PipelineRuns %q: %v", rpt.ChildPipelineRunNames, err)
