@@ -155,7 +155,7 @@ func (t ResolvedPipelineTask) IsChildPipeline() bool {
 // If the PipelineTask has a Matrix, getReason returns the failure reason for any failure
 // otherwise, it returns an empty string
 func (t ResolvedPipelineTask) getReason() string {
-	if t.PipelineTask.PipelineSpec != nil {
+	if t.IsChildPipeline() {
 		if len(t.ChildPipelineRuns) == 0 {
 			return ""
 		}
@@ -201,7 +201,7 @@ func (t ResolvedPipelineTask) getReason() string {
 // isSuccessful returns true only if the run has completed successfully
 // If the PipelineTask has a Matrix, isSuccessful returns true if all runs have completed successfully
 func (t ResolvedPipelineTask) isSuccessful() bool {
-	if t.PipelineTask.PipelineSpec != nil {
+	if t.IsChildPipeline() {
 		if len(t.ChildPipelineRuns) == 0 {
 			return false
 		}
@@ -349,7 +349,7 @@ func (t ResolvedPipelineTask) isScheduled() bool {
 
 // haveAnyRunsFailed returns true when any of the child (PinP) PipelineRuns/TaskRuns/CustomRuns have succeeded condition with status set to false
 func (t ResolvedPipelineTask) haveAnyRunsFailed() bool {
-	if t.PipelineTask.PipelineSpec != nil {
+	if t.IsChildPipeline() {
 		return t.haveAnyChildPipelineRunsFailed()
 	}
 
@@ -679,7 +679,7 @@ func ResolvePipelineTask(
 	}
 
 	switch {
-	case rpt.PipelineTask.PipelineSpec != nil:
+	case rpt.IsChildPipeline():
 		rpt.ChildPipelineRunNames = GetNamesOfChildPipelineRuns(
 			pipelineRun.Status.ChildReferences,
 			pipelineTask.Name,
