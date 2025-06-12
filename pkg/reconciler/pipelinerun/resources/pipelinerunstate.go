@@ -257,7 +257,7 @@ func (state PipelineRunState) GetRunsResults() map[string][]v1beta1.CustomRunRes
 }
 
 // GetChildReferences returns a slice of references, including version, kind, name, and pipeline task name, for all
-// child (PIP) PipelineRuns, TaskRuns and Runs in the state.
+// child (PinP) PipelineRuns, TaskRuns and Runs in the state.
 func (facts *PipelineRunFacts) GetChildReferences() []v1.ChildStatusReference {
 	var childRefs []v1.ChildStatusReference
 
@@ -659,8 +659,8 @@ func (facts *PipelineRunFacts) GetSkippedTasks() []v1.SkippedTask {
 }
 
 // GetPipelineTaskStatus returns the status of a PipelineTask depending on its child (PinP)
-// PipelineRun/TaskRun/CustomRun the checks are implemented such that the finally tasks
-// are requesting status of the dag tasks
+// PipelineRun/TaskRun/CustomRun. The checks are implemented such that the finally tasks
+// are requesting status of the dag tasks.
 func (facts *PipelineRunFacts) GetPipelineTaskStatus() map[string]string {
 	// construct a map of tasks.<pipelineTask>.status and its state
 	tStatus := make(map[string]string)
