@@ -1803,7 +1803,7 @@ func TestPipelineRunState_IsFinalTaskStarted(t *testing.T) {
 func TestGetPipelineConditionStatus(t *testing.T) {
 	var taskRetriedState = PipelineRunState{{
 		PipelineTask: &pts[3], // 1 retry needed
-		TaskRunNames: []string{"pipelinerun-mytask1"},
+		TaskRunNames: []string{"pipelinerun-mytask4"},
 		TaskRuns:     []*v1.TaskRun{withCancelled(makeRetried(trs[0]))},
 		ResolvedTask: &resources.ResolvedTask{
 			TaskSpec: &task.Spec,
@@ -1812,19 +1812,19 @@ func TestGetPipelineConditionStatus(t *testing.T) {
 
 	var taskCancelledFailed = PipelineRunState{{
 		PipelineTask: &pts[4],
-		TaskRunNames: []string{"pipelinerun-mytask1"},
+		TaskRunNames: []string{"pipelinerun-mytask5"},
 		TaskRuns:     []*v1.TaskRun{withCancelled(makeFailed(trs[0]))},
 	}}
 
 	var taskCancelledFailedTimedOut = PipelineRunState{{
 		PipelineTask: &pts[4],
-		TaskRunNames: []string{"pipelinerun-mytask1"},
+		TaskRunNames: []string{"pipelinerun-mytask5"},
 		TaskRuns:     []*v1.TaskRun{withCancelledForTimeout(makeFailed(trs[0]))},
 	}}
 
 	var cancelledTask = PipelineRunState{{
-		PipelineTask: &pts[3], // 1 retry needed
-		TaskRunNames: []string{"pipelinerun-mytask1"},
+		PipelineTask: &pts[3],
+		TaskRunNames: []string{"pipelinerun-mytask4"},
 		TaskRuns: []*v1.TaskRun{{
 			Status: v1.TaskRunStatus{
 				Status: duckv1.Status{Conditions: []apis.Condition{{
@@ -1858,7 +1858,7 @@ func TestGetPipelineConditionStatus(t *testing.T) {
 	var timedOutRun = PipelineRunState{{
 		PipelineTask:   &pts[12],
 		CustomTask:     true,
-		CustomRunNames: []string{"pipelinerun-mytask14"},
+		CustomRunNames: []string{"pipelinerun-mytask13"},
 		CustomRuns: []*v1beta1.CustomRun{
 			{
 				Spec: v1beta1.CustomRunSpec{
@@ -1877,15 +1877,12 @@ func TestGetPipelineConditionStatus(t *testing.T) {
 	var notRunningRun = PipelineRunState{{
 		PipelineTask:   &pts[12],
 		CustomTask:     true,
-		CustomRunNames: []string{"pipelinerun-mytask14"},
+		CustomRunNames: []string{"pipelinerun-mytask13"},
 	}}
 
-	// 6 Tasks, 4 that run in parallel in the beginning
-	// Of the 4, 1 passed, 1 cancelled, 2 failed
-	// 1 runAfter the passed one, currently running
-	// 1 runAfter the failed one, which is marked as incomplete
-	var taskMultipleFailuresSkipRunning = PipelineRunState{{
-		TaskRunNames: []string{"task0taskrun"},
+	// 3 Tasks, 1 successful, 1 running, 1 failed
+	var tasksWithOneFailureSkipRunning = PipelineRunState{{
+		TaskRunNames: []string{"successfulTaskRun"},
 		PipelineTask: &pts[5],
 		TaskRuns:     []*v1.TaskRun{makeSucceeded(trs[0])},
 	}, {
@@ -1898,11 +1895,11 @@ func TestGetPipelineConditionStatus(t *testing.T) {
 		TaskRuns:     []*v1.TaskRun{makeFailed(trs[0])},
 	}}
 
-	var taskMultipleFailuresOneCancel = taskMultipleFailuresSkipRunning
-	taskMultipleFailuresOneCancel = append(taskMultipleFailuresOneCancel, cancelledTask[0])
+	var tasksWithOneFailureOneCancel = tasksWithOneFailureSkipRunning
+	tasksWithOneFailureOneCancel = append(tasksWithOneFailureOneCancel, cancelledTask[0])
 
-	var taskNotRunningWithSuccesfulParentsOneFailed = PipelineRunState{{
-		TaskRunNames: []string{"task0taskrun"},
+	var taskNotRunningWithSuccessfulParentsOneFailed = PipelineRunState{{
+		TaskRunNames: []string{"successfulTaskRun"},
 		PipelineTask: &pts[5],
 		TaskRuns:     []*v1.TaskRun{makeSucceeded(trs[0])},
 	}, {
@@ -2013,8 +2010,8 @@ func TestGetPipelineConditionStatus(t *testing.T) {
 		expectedStatus: corev1.ConditionFalse,
 		expectedFailed: 1,
 	}, {
-		name:               "task with multiple failures",
-		state:              taskMultipleFailuresSkipRunning,
+		name:               "tasks with one failed task",
+		state:              tasksWithOneFailureSkipRunning,
 		expectedReason:     v1.PipelineRunReasonStopping.String(),
 		expectedStatus:     corev1.ConditionUnknown,
 		expectedSucceeded:  1,
@@ -2023,8 +2020,8 @@ func TestGetPipelineConditionStatus(t *testing.T) {
 		expectedCancelled:  0,
 		expectedSkipped:    0,
 	}, {
-		name:               "task with multiple failures; one cancelled",
-		state:              taskMultipleFailuresOneCancel,
+		name:               "tasks with one failed task; one cancelled",
+		state:              tasksWithOneFailureOneCancel,
 		expectedReason:     v1.PipelineRunReasonStopping.String(),
 		expectedStatus:     corev1.ConditionUnknown,
 		expectedSucceeded:  1,
@@ -2034,7 +2031,7 @@ func TestGetPipelineConditionStatus(t *testing.T) {
 		expectedSkipped:    0,
 	}, {
 		name:              "task not started with passed parent; one failed",
-		state:             taskNotRunningWithSuccesfulParentsOneFailed,
+		state:             taskNotRunningWithSuccessfulParentsOneFailed,
 		expectedReason:    v1.PipelineRunReasonFailed.String(),
 		expectedStatus:    corev1.ConditionFalse,
 		expectedSucceeded: 1,
@@ -2068,6 +2065,38 @@ func TestGetPipelineConditionStatus(t *testing.T) {
 		expectedStatus:  corev1.ConditionFalse,
 		expectedReason:  v1.PipelineRunReasonFailed.String(),
 		expectedSkipped: 1,
+	}, {
+		name:               "no-child-pipelines-started",
+		state:              noneStartedChildPipelineRunState,
+		expectedStatus:     corev1.ConditionUnknown,
+		expectedReason:     v1.PipelineRunReasonRunning.String(),
+		expectedIncomplete: 2,
+	}, {
+		name:               "one-child-pipeline-started",
+		state:              oneChildPipelineRunStartedState,
+		expectedStatus:     corev1.ConditionUnknown,
+		expectedReason:     v1.PipelineRunReasonRunning.String(),
+		expectedIncomplete: 2,
+	}, {
+		name:               "one-child-pipeline-finished",
+		state:              oneChildPipelineRunFinishedState,
+		expectedStatus:     corev1.ConditionUnknown,
+		expectedReason:     v1.PipelineRunReasonRunning.String(),
+		expectedSucceeded:  1,
+		expectedIncomplete: 1,
+	}, {
+		name:            "one-child-pipeline-failed",
+		state:           oneChildPipelineRunFailedState,
+		expectedStatus:  corev1.ConditionFalse,
+		expectedReason:  v1.PipelineRunReasonFailed.String(),
+		expectedFailed:  1,
+		expectedSkipped: 1,
+	}, {
+		name:              "all-child-pipelines-finished",
+		state:             allChildPipelineRunsFinishedState,
+		expectedStatus:    corev1.ConditionTrue,
+		expectedReason:    v1.PipelineRunReasonSuccessful.String(),
+		expectedSucceeded: 2,
 	}}
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
