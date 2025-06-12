@@ -254,6 +254,17 @@ func (t ResolvedPipelineTask) isSuccessful() bool {
 // If the PipelineTask has a Matrix, isFailure returns true if any run has failed and all other runs are done.
 func (t ResolvedPipelineTask) isFailure() bool {
 	var isDone bool
+	if t.IsChildPipeline() {
+		if len(t.ChildPipelineRuns) == 0 {
+			return false
+		}
+		isDone = true
+		for _, childPipelineRun := range t.ChildPipelineRuns {
+			isDone = isDone && childPipelineRun.IsDone()
+		}
+		return t.haveAnyChildPipelineRunsFailed() && isDone
+	}
+
 	if t.IsCustomTask() {
 		if len(t.CustomRuns) == 0 {
 			return false
@@ -264,6 +275,7 @@ func (t ResolvedPipelineTask) isFailure() bool {
 		}
 		return t.haveAnyRunsFailed() && isDone
 	}
+
 	if len(t.TaskRuns) == 0 {
 		return false
 	}
