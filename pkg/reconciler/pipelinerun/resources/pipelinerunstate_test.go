@@ -446,6 +446,21 @@ func TestGetNextTasks(t *testing.T) {
 		candidates:   sets.NewString("mytask13", "mytask14"),
 		expectedNext: []*ResolvedPipelineTask{oneCustomRunFailedState[1]},
 	}, {
+		name:         "no-child-pipelineruns-started-both-candidates",
+		state:        noneStartedChildPipelineRunState,
+		candidates:   sets.NewString("mytask22", "mytask23"),
+		expectedNext: []*ResolvedPipelineTask{noneStartedChildPipelineRunState[0], noneStartedChildPipelineRunState[1]},
+	}, {
+		name:         "one-child-pipelinerun-started-both-candidates",
+		state:        oneChildPipelineRunStartedState,
+		candidates:   sets.NewString("mytask22", "mytask23"),
+		expectedNext: []*ResolvedPipelineTask{oneChildPipelineRunStartedState[1]},
+	}, {
+		name:         "one-child-pipelinerun-failed-both-candidates",
+		state:        oneChildPipelineRunFailedState,
+		candidates:   sets.NewString("mytask22", "mytask23"),
+		expectedNext: []*ResolvedPipelineTask{oneChildPipelineRunFailedState[1]},
+	}, {
 		name:         "no-tasks-started-no-candidates-matrix",
 		state:        noneStartedStateMatrix,
 		candidates:   sets.NewString(),
