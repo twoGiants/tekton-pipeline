@@ -928,6 +928,16 @@ func TestDAGExecutionQueue(t *testing.T) {
 		CustomRunNames: []string{"createdrun"},
 		CustomTask:     true,
 	}
+	createdChildPipeline := ResolvedPipelineTask{
+		PipelineTask: &v1.PipelineTask{
+			Name:         "createdchildpipeline",
+			PipelineSpec: &v1.PipelineSpec{Tasks: []v1.PipelineTask{{Name: "childpipeline"}}},
+		},
+		ChildPipelineRunNames: []string{"createdchildpipeline"},
+		ResolvedPipeline: ResolvedPipeline{
+			PipelineSpec: p.Spec.Tasks[21].PipelineSpec,
+		},
+	}
 	runningTask := ResolvedPipelineTask{
 		PipelineTask: &v1.PipelineTask{
 			Name:    "runningtask",
@@ -947,6 +957,17 @@ func TestDAGExecutionQueue(t *testing.T) {
 		CustomRunNames: []string{"runningrun"},
 		CustomRuns:     []*v1beta1.CustomRun{newCustomRun(customRuns[0])},
 		CustomTask:     true,
+	}
+	runningChildPipeline := ResolvedPipelineTask{
+		PipelineTask: &v1.PipelineTask{
+			Name:         "runningchildpipeline",
+			PipelineSpec: &v1.PipelineSpec{Tasks: []v1.PipelineTask{{Name: "childpipeline"}}},
+		},
+		ChildPipelineRunNames: []string{"runningchildpipeline"},
+		ChildPipelineRuns:     []*v1.PipelineRun{newPipelineRun(prs[0])},
+		ResolvedPipeline: ResolvedPipeline{
+			PipelineSpec: p.Spec.Tasks[21].PipelineSpec,
+		},
 	}
 	successfulTask := ResolvedPipelineTask{
 		PipelineTask: &v1.PipelineTask{
@@ -968,6 +989,17 @@ func TestDAGExecutionQueue(t *testing.T) {
 		CustomRuns:     []*v1beta1.CustomRun{makeCustomRunSucceeded(customRuns[0])},
 		CustomTask:     true,
 	}
+	successfulChildPipeline := ResolvedPipelineTask{
+		PipelineTask: &v1.PipelineTask{
+			Name:         "successfulchildpipeline",
+			PipelineSpec: &v1.PipelineSpec{Tasks: []v1.PipelineTask{{Name: "childpipeline"}}},
+		},
+		ChildPipelineRunNames: []string{"successfulchildpipeline"},
+		ChildPipelineRuns:     []*v1.PipelineRun{makePipelineRunSucceeded(prs[0])},
+		ResolvedPipeline: ResolvedPipeline{
+			PipelineSpec: p.Spec.Tasks[21].PipelineSpec,
+		},
+	}
 	failedTask := ResolvedPipelineTask{
 		PipelineTask: &v1.PipelineTask{
 			Name:    "failedtask",
@@ -988,6 +1020,17 @@ func TestDAGExecutionQueue(t *testing.T) {
 		CustomRuns:     []*v1beta1.CustomRun{makeCustomRunFailed(customRuns[0])},
 		CustomTask:     true,
 	}
+	failedChildPipeline := ResolvedPipelineTask{
+		PipelineTask: &v1.PipelineTask{
+			Name:         "failedchildpipeline",
+			PipelineSpec: &v1.PipelineSpec{Tasks: []v1.PipelineTask{{Name: "childpipeline"}}},
+		},
+		ChildPipelineRunNames: []string{"failedchildpipeline"},
+		ChildPipelineRuns:     []*v1.PipelineRun{makePipelineRunFailed(prs[0])},
+		ResolvedPipeline: ResolvedPipeline{
+			PipelineSpec: p.Spec.Tasks[21].PipelineSpec,
+		},
+	}
 	tcs := []struct {
 		name       string
 		state      PipelineRunState
@@ -997,38 +1040,48 @@ func TestDAGExecutionQueue(t *testing.T) {
 		name:       "cancelled",
 		specStatus: v1.PipelineRunSpecStatusCancelled,
 		state: PipelineRunState{
-			&createdTask, &createdRun,
-			&runningTask, &runningRun, &successfulTask, &successfulRun,
+			&createdTask, &createdRun, &createdChildPipeline,
+			&runningTask, &runningRun, &runningChildPipeline,
+			&successfulTask, &successfulRun, &successfulChildPipeline,
 		},
 	}, {
 		name:       "gracefully cancelled",
 		specStatus: v1.PipelineRunSpecStatusCancelledRunFinally,
 		state: PipelineRunState{
-			&createdTask, &createdRun,
-			&runningTask, &runningRun, &successfulTask, &successfulRun,
+			&createdTask, &createdRun, &createdChildPipeline,
+			&runningTask, &runningRun, &runningChildPipeline,
+			&successfulTask, &successfulRun, &successfulChildPipeline,
 		},
 	}, {
 		name:       "gracefully stopped",
 		specStatus: v1.PipelineRunSpecStatusStoppedRunFinally,
 		state: PipelineRunState{
-			&createdTask, &createdRun, &runningTask, &runningRun, &successfulTask, &successfulRun,
+			&createdTask, &createdRun, &createdChildPipeline,
+			&runningTask, &runningRun, &runningChildPipeline,
+			&successfulTask, &successfulRun, &successfulChildPipeline,
 		},
 	}, {
 		name: "running",
 		state: PipelineRunState{
-			&createdTask, &createdRun, &runningTask, &runningRun,
-			&successfulTask, &successfulRun,
+			&createdTask, &createdRun, &createdChildPipeline,
+			&runningTask, &runningRun, &runningChildPipeline,
+			&successfulTask, &successfulRun, &successfulChildPipeline,
 		},
-		want: PipelineRunState{&createdTask, &createdRun},
+		want: PipelineRunState{&createdTask, &createdRun, &createdChildPipeline},
 	}, {
 		name: "stopped",
 		state: PipelineRunState{
-			&createdTask, &createdRun, &runningTask, &runningRun,
-			&successfulTask, &successfulRun, &failedTask, &failedCustomRun,
+			&createdTask, &createdRun, &createdChildPipeline,
+			&runningTask, &runningRun, &runningChildPipeline,
+			&successfulTask, &successfulRun, &successfulChildPipeline,
+			&failedTask, &failedCustomRun, &failedChildPipeline,
 		},
 	}, {
-		name:  "all tasks finished",
-		state: PipelineRunState{&successfulTask, &successfulRun, &failedTask, &failedCustomRun},
+		name: "all tasks finished",
+		state: PipelineRunState{
+			&successfulTask, &successfulRun, &successfulChildPipeline,
+			&failedTask, &failedCustomRun, &failedChildPipeline,
+		},
 	}}
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1238,6 +1291,105 @@ func TestDAGExecutionQueueSequentialRuns(t *testing.T) {
 			}
 			if tc.wantSecond {
 				expectedQueue = append(expectedQueue, &secondRun)
+			}
+			if d := cmp.Diff(expectedQueue, queue, cmpopts.EquateEmpty()); d != "" {
+				t.Errorf("Didn't get expected execution queue: %s", diff.PrintWantGot(d))
+			}
+		})
+	}
+}
+
+// TestDAGExecutionQueueSequentialChildPipelines tests the DAGExecutionQueue function for sequential child
+// PipelineRuns in different states for a running or stopping PipelineRun.
+func TestDAGExecutionQueueSequentialChildPipelines(t *testing.T) {
+	tcs := []struct {
+		name                   string
+		firstChildPipelineRun  *v1.PipelineRun
+		secondChildPipelineRun *v1.PipelineRun
+		specStatus             v1.PipelineRunSpecStatus
+		wantFirst              bool
+		wantSecond             bool
+	}{{
+		name:      "not started",
+		wantFirst: true,
+	}, {
+		name:                  "first child pipeline running",
+		firstChildPipelineRun: newPipelineRun(prs[0]),
+	}, {
+		name:                  "first child pipeline succeeded",
+		firstChildPipelineRun: makePipelineRunSucceeded(prs[0]),
+		wantSecond:            true,
+	}, {
+		name:                  "first child pipeline failed",
+		firstChildPipelineRun: makePipelineRunFailed(prs[0]),
+	}, {
+		name:                   "first child pipeline succeeded, second child pipeline running",
+		firstChildPipelineRun:  makePipelineRunSucceeded(prs[0]),
+		secondChildPipelineRun: newPipelineRun(prs[1]),
+	}, {
+		name:                   "first child pipeline succeeded, second child pipeline succeeded",
+		firstChildPipelineRun:  makePipelineRunSucceeded(prs[0]),
+		secondChildPipelineRun: makePipelineRunSucceeded(prs[1]),
+	}, {
+		name:                   "first child pipeline succeeded, second child pipeline failed",
+		firstChildPipelineRun:  makePipelineRunSucceeded(prs[0]),
+		secondChildPipelineRun: makePipelineRunFailed(prs[1]),
+	}}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			firstTask := ResolvedPipelineTask{
+				PipelineTask: &v1.PipelineTask{
+					Name:         "pip-child-1",
+					PipelineSpec: &v1.PipelineSpec{Tasks: []v1.PipelineTask{{Name: "pip-child-1-task"}}},
+				},
+				ChildPipelineRunNames: []string{"pip-child-1"},
+				ResolvedPipeline: ResolvedPipeline{
+					PipelineSpec: p.Spec.Tasks[21].PipelineSpec,
+				},
+			}
+
+			secondTask := ResolvedPipelineTask{
+				PipelineTask: &v1.PipelineTask{
+					Name:         "pip-child-2",
+					PipelineSpec: &v1.PipelineSpec{Tasks: []v1.PipelineTask{{Name: "pip-child-2-task"}}},
+					RunAfter:     []string{"pip-child-1"},
+				},
+				ChildPipelineRunNames: []string{"pip-child-2"},
+				ResolvedPipeline: ResolvedPipeline{
+					PipelineSpec: p.Spec.Tasks[22].PipelineSpec,
+				},
+			}
+
+			if tc.firstChildPipelineRun != nil {
+				firstTask.ChildPipelineRuns = append(firstTask.ChildPipelineRuns, tc.firstChildPipelineRun)
+			}
+			if tc.secondChildPipelineRun != nil {
+				secondTask.ChildPipelineRuns = append(secondTask.ChildPipelineRuns, tc.secondChildPipelineRun)
+			}
+			state := PipelineRunState{&firstTask, &secondTask}
+			d, err := dagFromState(state)
+			if err != nil {
+				t.Fatalf("Unexpected error while building DAG for state %v: %v", state, err)
+			}
+			facts := PipelineRunFacts{
+				State:           state,
+				SpecStatus:      tc.specStatus,
+				TasksGraph:      d,
+				FinalTasksGraph: &dag.Graph{},
+				TimeoutsState: PipelineRunTimeoutsState{
+					Clock: testClock,
+				},
+			}
+			queue, err := facts.DAGExecutionQueue()
+			if err != nil {
+				t.Errorf("unexpected error getting DAG execution queue but got error %s", err)
+			}
+			var expectedQueue PipelineRunState
+			if tc.wantFirst && &firstTask != nil {
+				expectedQueue = append(expectedQueue, &firstTask)
+			}
+			if tc.wantSecond && &secondTask != nil {
+				expectedQueue = append(expectedQueue, &secondTask)
 			}
 			if d := cmp.Diff(expectedQueue, queue, cmpopts.EquateEmpty()); d != "" {
 				t.Errorf("Didn't get expected execution queue: %s", diff.PrintWantGot(d))
