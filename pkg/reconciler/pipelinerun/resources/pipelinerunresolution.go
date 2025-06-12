@@ -146,6 +146,11 @@ func (t ResolvedPipelineTask) IsCustomTask() bool {
 	return t.CustomTask
 }
 
+// IsChildPipeline returns true if the PipelineTask references a child (PinP) Pipeline.
+func (t ResolvedPipelineTask) IsChildPipeline() bool {
+	return t.PipelineTask.PipelineSpec != nil
+}
+
 // getReason returns the latest reason if the run has completed successfully
 // If the PipelineTask has a Matrix, getReason returns the failure reason for any failure
 // otherwise, it returns an empty string
