@@ -2475,7 +2475,7 @@ func TestAdjustStartTime(t *testing.T) {
 		// We expect this to adjust to the earlier time.
 		want: baseline.Time.Add(-1 * time.Second),
 	}, {
-		name: "multiple taskruns, some earlier",
+		name: "multiple taskruns each in a separate state, some earlier",
 		prs: PipelineRunState{{
 			TaskRuns: []*v1.TaskRun{{
 				ObjectMeta: metav1.ObjectMeta{
@@ -2503,7 +2503,7 @@ func TestAdjustStartTime(t *testing.T) {
 		// We expect this to adjust to the earlier time.
 		want: baseline.Time.Add(-2 * time.Second),
 	}, {
-		name: "multiple taskruns, some earlier",
+		name: "multiple taskruns in one state, some earlier",
 		prs: PipelineRunState{{
 			TaskRuns: []*v1.TaskRun{{
 				ObjectMeta: metav1.ObjectMeta{
@@ -2573,6 +2573,53 @@ func TestAdjustStartTime(t *testing.T) {
 		}},
 		// We expect this to adjust to the earlier time.
 		want: baseline.Time.Add(-1 * time.Second),
+	}, {
+		name: "child PipelineRun starts earlier",
+		prs: PipelineRunState{{
+			ChildPipelineRuns: []*v1.PipelineRun{{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "blah",
+					CreationTimestamp: metav1.Time{Time: baseline.Time.Add(-1 * time.Second)},
+				},
+			}},
+		}},
+		// We expect this to adjust to the earlier time.
+		want: baseline.Time.Add(-1 * time.Second),
+	}, {
+		name: "child PipelineRun starts later",
+		prs: PipelineRunState{{
+			ChildPipelineRuns: []*v1.PipelineRun{{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "blah",
+					CreationTimestamp: metav1.Time{Time: baseline.Time.Add(1 * time.Second)},
+				},
+			}},
+		}},
+		// Stay where you are, you are before the Run.
+		want: baseline.Time,
+	}, {
+		name: "multiple child PipelineRuns, some earlier",
+		prs: PipelineRunState{{
+			ChildPipelineRuns: []*v1.PipelineRun{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "blah1",
+						CreationTimestamp: metav1.Time{Time: baseline.Time.Add(-1 * time.Second)},
+					},
+				}, {
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "blah2",
+						CreationTimestamp: metav1.Time{Time: baseline.Time.Add(-2 * time.Second)},
+					},
+				}, {
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "blah3",
+						CreationTimestamp: metav1.Time{Time: baseline.Time.Add(2 * time.Second)},
+					},
+				}},
+		}},
+		// We expect this to adjust to the earlier time.
+		want: baseline.Time.Add(-2 * time.Second),
 	}}
 
 	for _, test := range tests {
