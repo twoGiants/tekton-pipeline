@@ -2951,6 +2951,51 @@ func TestIsCustomTask(t *testing.T) {
 	}
 }
 
+func TestIsChildPipeline(t *testing.T) {
+	pr := v1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pipelinerun",
+		},
+	}
+	getTask := getTaskFn(nil, nil)
+	getTaskRun := getTaskRunFn(nil)
+	getChildPipelineRun := func(name string) (*v1.PipelineRun, error) { return nil, nil } //nolint:nilnil
+
+	for _, tc := range []struct {
+		name string
+		pt   v1.PipelineTask
+		want bool
+	}{{
+		name: "parent pipeline with child pipeline using PipelineSpec",
+		pt: v1.PipelineTask{
+			PipelineSpec: &v1.PipelineSpec{
+				Tasks: []v1.PipelineTask{{Name: "pip-child-task"}},
+			},
+		},
+		want: true,
+	}, {
+		name: "pipeline with task using TaskSpec",
+		pt: v1.PipelineTask{
+			TaskSpec: &v1.EmbeddedTask{},
+		},
+		want: false,
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			cfg := config.NewStore(logtesting.TestLogger(t))
+			ctx = cfg.ToContext(ctx)
+			rpt, err := ResolvePipelineTask(ctx, pr, getChildPipelineRun, getTask, getTaskRun, nopGetCustomRun, tc.pt, nil)
+			if err != nil {
+				t.Fatalf("Did not expect error when resolving PipelineRun: %v", err)
+			}
+			got := rpt.IsChildPipeline()
+			if d := cmp.Diff(tc.want, got); d != "" {
+				t.Errorf("IsChildPipeline: %s", diff.PrintWantGot(d))
+			}
+		})
+	}
+}
+
 func TestResolvedPipelineRunTask_IsFinallySkipped(t *testing.T) {
 	tr := &v1.TaskRun{
 		ObjectMeta: metav1.ObjectMeta{
