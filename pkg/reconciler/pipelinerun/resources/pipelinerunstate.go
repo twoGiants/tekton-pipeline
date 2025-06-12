@@ -172,7 +172,7 @@ func (state PipelineRunState) AdjustStartTime(unadjustedStartTime *metav1.Time) 
 func (state PipelineRunState) GetTaskRunsResults() map[string][]v1.TaskRunResult {
 	results := make(map[string][]v1.TaskRunResult)
 	for _, rpt := range state {
-		if rpt.PipelineTask.PipelineSpec != nil {
+		if rpt.IsChildPipeline() {
 			continue
 		}
 		if rpt.IsCustomTask() {
@@ -694,7 +694,7 @@ func (facts *PipelineRunFacts) GetPipelineTaskStatus() map[string]string {
 				// if any of the dag pipeline tasks failed, change the aggregate status to failed and return
 				if !t.IsCustomTask() && t.haveAnyTaskRunsFailed() ||
 					t.IsCustomTask() && t.haveAnyCustomRunsFailed() ||
-					t.PipelineTask.PipelineSpec != nil && t.haveAnyChildPipelineRunsFailed() {
+					t.IsChildPipeline() && t.haveAnyChildPipelineRunsFailed() {
 					aggregateStatus = v1.PipelineRunReasonFailed.String()
 					break
 				}
