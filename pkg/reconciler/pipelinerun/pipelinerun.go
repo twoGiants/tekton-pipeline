@@ -686,7 +686,7 @@ func (c *Reconciler) reconcile(ctx context.Context, pr *v1.PipelineRun, getPipel
 
 	for i, rpt := range pipelineRunFacts.State {
 		// Task?
-		if !rpt.IsCustomTask() && rpt.PipelineTask.PipelineSpec == nil {
+		if !rpt.IsCustomTask() && !rpt.IsChildPipeline() {
 			err := taskrun.ValidateResolvedTask(ctx, rpt.PipelineTask.Params, rpt.PipelineTask.Matrix, rpt.ResolvedTask)
 			if err != nil {
 				logger.Errorf("Failed to validate pipelinerun %s with error %w", pr.Name, err)
@@ -961,7 +961,7 @@ func (c *Reconciler) runNextSchedulableTask(ctx context.Context, pr *v1.Pipeline
 		}
 
 		switch {
-		case rpt.PipelineTask.PipelineSpec != nil:
+		case rpt.IsChildPipeline():
 			rpt.ChildPipelineRuns, err = c.createChildPipelineRuns(ctx, rpt, pr, pipelineRunFacts)
 			if err != nil {
 				recorder.Eventf(pr, corev1.EventTypeWarning, "ChildPipelineRunsCreationFailed", "Failed to create child (PIP) PipelineRuns %q: %v", rpt.ChildPipelineRunNames, err)
