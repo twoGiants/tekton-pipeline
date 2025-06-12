@@ -2780,6 +2780,61 @@ func TestPipelineRunFacts_GetPipelineTaskStatus(t *testing.T) {
 			PipelineTaskStatusPrefix + pts[10].Name + PipelineTaskReasonSuffix: "",
 			v1.PipelineTasksAggregateStatus:                                    v1.PipelineRunReasonFailed.String(),
 		},
+	}, {
+		name:     "no-child-pipelines-started",
+		state:    noneStartedChildPipelineRunState,
+		dagTasks: []v1.PipelineTask{pts[21], pts[22]},
+		expectedStatus: map[string]string{
+			PipelineTaskStatusPrefix + pts[21].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[21].Name + PipelineTaskReasonSuffix: "",
+			PipelineTaskStatusPrefix + pts[22].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[22].Name + PipelineTaskReasonSuffix: "",
+			v1.PipelineTasksAggregateStatus:                                    PipelineTaskStateNone,
+		},
+	}, {
+		name:     "one-child-pipeline-started",
+		state:    oneChildPipelineRunStartedState,
+		dagTasks: []v1.PipelineTask{pts[21], pts[22]},
+		expectedStatus: map[string]string{
+			PipelineTaskStatusPrefix + pts[21].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[21].Name + PipelineTaskReasonSuffix: "",
+			PipelineTaskStatusPrefix + pts[22].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[22].Name + PipelineTaskReasonSuffix: "",
+			v1.PipelineTasksAggregateStatus:                                    PipelineTaskStateNone,
+		},
+	}, {
+		name:     "one-child-pipeline-finished",
+		state:    oneChildPipelineRunFinishedState,
+		dagTasks: []v1.PipelineTask{pts[21], pts[22]},
+		expectedStatus: map[string]string{
+			PipelineTaskStatusPrefix + pts[21].Name + PipelineTaskStatusSuffix: v1.PipelineRunReasonSuccessful.String(),
+			PipelineTaskStatusPrefix + pts[21].Name + PipelineTaskReasonSuffix: "Succeeded",
+			PipelineTaskStatusPrefix + pts[22].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[22].Name + PipelineTaskReasonSuffix: "",
+			v1.PipelineTasksAggregateStatus:                                    PipelineTaskStateNone,
+		},
+	}, {
+		name:     "one-child-pipeline-failed",
+		state:    oneChildPipelineRunFailedState,
+		dagTasks: []v1.PipelineTask{pts[21], pts[22]},
+		expectedStatus: map[string]string{
+			PipelineTaskStatusPrefix + pts[21].Name + PipelineTaskStatusSuffix: v1.PipelineRunReasonFailed.String(),
+			PipelineTaskStatusPrefix + pts[21].Name + PipelineTaskReasonSuffix: "Failed",
+			PipelineTaskStatusPrefix + pts[22].Name + PipelineTaskStatusSuffix: PipelineTaskStateNone,
+			PipelineTaskStatusPrefix + pts[22].Name + PipelineTaskReasonSuffix: "",
+			v1.PipelineTasksAggregateStatus:                                    v1.PipelineRunReasonFailed.String(),
+		},
+	}, {
+		name:     "all-child-pipelines-finished",
+		state:    allChildPipelineRunsFinishedState,
+		dagTasks: []v1.PipelineTask{pts[21], pts[22]},
+		expectedStatus: map[string]string{
+			PipelineTaskStatusPrefix + pts[21].Name + PipelineTaskStatusSuffix: v1.PipelineRunReasonSuccessful.String(),
+			PipelineTaskStatusPrefix + pts[21].Name + PipelineTaskReasonSuffix: "Succeeded",
+			PipelineTaskStatusPrefix + pts[22].Name + PipelineTaskStatusSuffix: v1.PipelineRunReasonSuccessful.String(),
+			PipelineTaskStatusPrefix + pts[22].Name + PipelineTaskReasonSuffix: "Succeeded",
+			v1.PipelineTasksAggregateStatus:                                    v1.PipelineRunReasonSuccessful.String(),
+		},
 	}}
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
