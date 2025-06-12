@@ -287,6 +287,12 @@ func makeScheduled(tr v1.TaskRun) *v1.TaskRun {
 	return newTr
 }
 
+func makePipelineRunScheduled(pr v1.PipelineRun) *v1.PipelineRun {
+	newPr := newPipelineRun(pr)
+	newPr.Status = v1.PipelineRunStatus{ /* explicitly empty */ }
+	return newPr
+}
+
 func makeStarted(tr v1.TaskRun) *v1.TaskRun {
 	newTr := newTaskRun(tr)
 	newTr.Status.Conditions[0].Status = corev1.ConditionUnknown
@@ -297,6 +303,12 @@ func makeCustomRunStarted(run v1beta1.CustomRun) *v1beta1.CustomRun {
 	newRun := newCustomRun(run)
 	newRun.Status.Conditions[0].Status = corev1.ConditionUnknown
 	return newRun
+}
+
+func makePipelineRunStarted(pr v1.PipelineRun) *v1.PipelineRun {
+	newPr := newPipelineRun(pr)
+	newPr.Status.Conditions[0].Status = corev1.ConditionUnknown
+	return newPr
 }
 
 func makeSucceeded(tr v1.TaskRun) *v1.TaskRun {
@@ -311,6 +323,13 @@ func makeCustomRunSucceeded(run v1beta1.CustomRun) *v1beta1.CustomRun {
 	newRun.Status.Conditions[0].Status = corev1.ConditionTrue
 	newRun.Status.Conditions[0].Reason = "Succeeded"
 	return newRun
+}
+
+func makePipelineRunSucceeded(pr v1.PipelineRun) *v1.PipelineRun {
+	newPr := newPipelineRun(pr)
+	newPr.Status.Conditions[0].Status = corev1.ConditionTrue
+	newPr.Status.Conditions[0].Reason = "Succeeded"
+	return newPr
 }
 
 func makeFailed(tr v1.TaskRun) *v1.TaskRun {
@@ -332,6 +351,13 @@ func makeCustomRunFailed(run v1beta1.CustomRun) *v1beta1.CustomRun {
 	newRun.Status.Conditions[0].Status = corev1.ConditionFalse
 	newRun.Status.Conditions[0].Reason = "Failed"
 	return newRun
+}
+
+func makePipelineRunFailed(pr v1.PipelineRun) *v1.PipelineRun {
+	newPr := newPipelineRun(pr)
+	newPr.Status.Conditions[0].Status = corev1.ConditionFalse
+	newPr.Status.Conditions[0].Reason = "Failed"
+	return newPr
 }
 
 func withCancelled(tr *v1.TaskRun) *v1.TaskRun {
@@ -424,6 +450,21 @@ func newCustomRun(run v1beta1.CustomRun) *v1beta1.CustomRun {
 		},
 		Spec: run.Spec,
 		Status: v1beta1.CustomRunStatus{
+			Status: duckv1.Status{
+				Conditions: []apis.Condition{{Type: apis.ConditionSucceeded}},
+			},
+		},
+	}
+}
+
+func newPipelineRun(pr v1.PipelineRun) *v1.PipelineRun {
+	return &v1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: pr.Namespace,
+			Name:      pr.Name,
+		},
+		Spec: pr.Spec,
+		Status: v1.PipelineRunStatus{
 			Status: duckv1.Status{
 				Conditions: []apis.Condition{{Type: apis.ConditionSucceeded}},
 			},
