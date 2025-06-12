@@ -3462,6 +3462,22 @@ func TestPipelineRunState_GetResultsFuncs(t *testing.T) {
 				},
 			},
 		},
+	}, {
+		ChildPipelineRunNames: []string{"successful-child-pipeline-without-results"},
+		PipelineTask: &v1.PipelineTask{
+			Name: "successful-child-pipeline-without-results-1",
+			PipelineSpec: &v1.PipelineSpec{
+				Tasks: []v1.PipelineTask{{Name: "pip-child"}},
+			}},
+		ChildPipelineRuns: []*v1.PipelineRun{{
+			Status: v1.PipelineRunStatus{
+				Status: duckv1.Status{Conditions: []apis.Condition{{
+					Type:   apis.ConditionSucceeded,
+					Status: corev1.ConditionTrue,
+				}}},
+				PipelineRunStatusFields: v1.PipelineRunStatusFields{},
+			},
+		}},
 	}}
 
 	expectedTaskResults := map[string][]v1.TaskRunResult{
