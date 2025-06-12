@@ -184,6 +184,38 @@ var pts = []v1.PipelineTask{{
 			Value: v1.ParamValue{ArrayVal: []string{"safari", "chrome"}},
 		}},
 	},
+}, {
+	Name: "mytask22",
+	PipelineSpec: &v1.PipelineSpec{
+		Tasks: []v1.PipelineTask{{
+			Name: "pip-child-task",
+			TaskSpec: &v1.EmbeddedTask{
+				TaskSpec: v1.TaskSpec{
+					Steps: []v1.Step{{
+						Name:   "hello-pip",
+						Image:  "mirror.gcr.io/alpine",
+						Script: "echo \"Hello from mytask22-pip-child-task!\"",
+					}},
+				},
+			},
+		}},
+	},
+}, {
+	Name: "mytask23",
+	PipelineSpec: &v1.PipelineSpec{
+		Tasks: []v1.PipelineTask{{
+			Name: "pip-child-task",
+			TaskSpec: &v1.EmbeddedTask{
+				TaskSpec: v1.TaskSpec{
+					Steps: []v1.Step{{
+						Name:   "goodbye-pip",
+						Image:  "mirror.gcr.io/alpine",
+						Script: "echo \"Goodbye from mytask23-pip-child-task!\"",
+					}},
+				},
+			},
+		}},
+	},
 }}
 
 var p = &v1.Pipeline{
@@ -239,6 +271,20 @@ var customRuns = []v1beta1.CustomRun{{
 		Name:      "pipelinerun-mytask14",
 	},
 	Spec: v1beta1.CustomRunSpec{},
+}}
+
+var prs = []v1.PipelineRun{{
+	ObjectMeta: metav1.ObjectMeta{
+		Namespace: "namespace",
+		Name:      "pipelinerun-mytask22",
+	},
+	Spec: v1.PipelineRunSpec{},
+}, {
+	ObjectMeta: metav1.ObjectMeta{
+		Namespace: "namespace",
+		Name:      "pipelinerun-mytask23",
+	},
+	Spec: v1.PipelineRunSpec{},
 }}
 
 var matrixedPipelineTask = &v1.PipelineTask{
@@ -755,6 +801,54 @@ var taskCancelledMatrix = PipelineRunState{{
 	TaskRuns:     []*v1.TaskRun{withCancelled(makeRetried(trs[0]))},
 	ResolvedTask: &resources.ResolvedTask{
 		TaskSpec: &task.Spec,
+	},
+}}
+
+var noneStartedChildPipelineRunState = PipelineRunState{{
+	PipelineTask:          &pts[21],
+	ChildPipelineRunNames: []string{"pipelinerun-mytask22"},
+	ChildPipelineRuns:     nil,
+	ResolvedPipeline: ResolvedPipeline{
+		PipelineSpec: pts[21].PipelineSpec,
+	},
+}, {
+	PipelineTask:          &pts[22],
+	ChildPipelineRunNames: []string{"pipelinerun-mytask23"},
+	ChildPipelineRuns:     nil,
+	ResolvedPipeline: ResolvedPipeline{
+		PipelineSpec: pts[22].PipelineSpec,
+	},
+}}
+
+var oneChildPipelineRunStartedState = PipelineRunState{{
+	PipelineTask:          &pts[21],
+	ChildPipelineRunNames: []string{"pipelinerun-mytask22"},
+	ChildPipelineRuns:     []*v1.PipelineRun{makePipelineRunStarted(prs[0])},
+	ResolvedPipeline: ResolvedPipeline{
+		PipelineSpec: pts[21].PipelineSpec,
+	},
+}, {
+	PipelineTask:          &pts[22],
+	ChildPipelineRunNames: []string{"pipelinerun-mytask23"},
+	ChildPipelineRuns:     nil,
+	ResolvedPipeline: ResolvedPipeline{
+		PipelineSpec: pts[22].PipelineSpec,
+	},
+}}
+
+var finalChildPipelineRunsScheduledState = PipelineRunState{{
+	PipelineTask:          &pts[21],
+	ChildPipelineRunNames: []string{"pipelinerun-mytask22"},
+	ChildPipelineRuns:     []*v1.PipelineRun{makePipelineRunSucceeded(prs[0])},
+	ResolvedPipeline: ResolvedPipeline{
+		PipelineSpec: pts[21].PipelineSpec,
+	},
+}, {
+	PipelineTask:          &pts[22],
+	ChildPipelineRunNames: []string{"pipelinerun-mytask23"},
+	ChildPipelineRuns:     []*v1.PipelineRun{makePipelineRunScheduled(prs[1])},
+	ResolvedPipeline: ResolvedPipeline{
+		PipelineSpec: pts[22].PipelineSpec,
 	},
 }}
 
