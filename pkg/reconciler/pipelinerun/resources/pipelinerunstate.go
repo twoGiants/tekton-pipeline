@@ -172,7 +172,7 @@ func (state PipelineRunState) AdjustStartTime(unadjustedStartTime *metav1.Time) 
 func (state PipelineRunState) GetTaskRunsResults() map[string][]v1.TaskRunResult {
 	results := make(map[string][]v1.TaskRunResult)
 	for _, rpt := range state {
-		if rpt.PipelineTask.PipelineSpec != nil {
+		if rpt.IsChildPipeline() {
 			continue
 		}
 		if rpt.IsCustomTask() {
@@ -198,6 +198,9 @@ func (state PipelineRunState) GetTaskRunsResults() map[string][]v1.TaskRunResult
 func (state PipelineRunState) GetTaskRunsArtifacts() map[string]*v1.Artifacts {
 	results := make(map[string]*v1.Artifacts)
 	for _, rpt := range state {
+		if rpt.IsChildPipeline() {
+			continue
+		}
 		if rpt.IsCustomTask() {
 			continue
 		}
@@ -257,7 +260,7 @@ func (state PipelineRunState) GetRunsResults() map[string][]v1beta1.CustomRunRes
 }
 
 // GetChildReferences returns a slice of references, including version, kind, name, and pipeline task name, for all
-// child (PIP) PipelineRuns, TaskRuns and Runs in the state.
+// child (PinP) PipelineRuns, TaskRuns and Runs in the state.
 func (facts *PipelineRunFacts) GetChildReferences() []v1.ChildStatusReference {
 	var childRefs []v1.ChildStatusReference
 
@@ -659,8 +662,8 @@ func (facts *PipelineRunFacts) GetSkippedTasks() []v1.SkippedTask {
 }
 
 // GetPipelineTaskStatus returns the status of a PipelineTask depending on its child (PinP)
-// PipelineRun/TaskRun/CustomRun the checks are implemented such that the finally tasks
-// are requesting status of the dag tasks
+// PipelineRun/TaskRun/CustomRun. The checks are implemented such that the finally tasks
+// are requesting status of the dag tasks.
 func (facts *PipelineRunFacts) GetPipelineTaskStatus() map[string]string {
 	// construct a map of tasks.<pipelineTask>.status and its state
 	tStatus := make(map[string]string)
@@ -694,7 +697,7 @@ func (facts *PipelineRunFacts) GetPipelineTaskStatus() map[string]string {
 				// if any of the dag pipeline tasks failed, change the aggregate status to failed and return
 				if !t.IsCustomTask() && t.haveAnyTaskRunsFailed() ||
 					t.IsCustomTask() && t.haveAnyCustomRunsFailed() ||
-					t.PipelineTask.PipelineSpec != nil && t.haveAnyChildPipelineRunsFailed() {
+					t.IsChildPipeline() && t.haveAnyChildPipelineRunsFailed() {
 					aggregateStatus = v1.PipelineRunReasonFailed.String()
 					break
 				}
