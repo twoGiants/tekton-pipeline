@@ -3842,6 +3842,62 @@ func TestGetRunName(t *testing.T) {
 	}
 }
 
+func TestGetNamesOfChildPipelineRuns(t *testing.T) {
+	prName := "mypipelinerun"
+	childRefs := []v1.ChildStatusReference{{
+		TypeMeta:         runtime.TypeMeta{Kind: "PipelineRun"},
+		Name:             "mypipelinerun-mychildpipelinetask",
+		PipelineTaskName: "mychildpipelinetask",
+	}}
+
+	for _, tc := range []struct {
+		name         string
+		ptName       string
+		prName       string
+		wantCprNames []string
+	}{{
+		name:         "existing child pipelinerun",
+		ptName:       "mychildpipelinetask",
+		wantCprNames: []string{"mypipelinerun-mychildpipelinetask"},
+	}, {
+		name:         "new child pipelinerun",
+		ptName:       "mynewchildpipelinetask",
+		wantCprNames: []string{"mypipelinerun-mynewchildpipelinetask"},
+	}, {
+		name:   "new pipelinetask with long names",
+		ptName: "longtask-0123456789-0123456789-0123456789-0123456789-0123456789",
+		wantCprNames: []string{
+			"mypipelineruna56c4ee0aab148ee219d40b21dfe935a-longtask-01234567",
+		},
+	}, {
+		name:   "new child pipelinetask, pipelinerun with long name",
+		ptName: "mychildpipelinetask",
+		prName: "pipeline-run-0123456789-0123456789-0123456789-0123456789",
+		wantCprNames: []string{
+			"pipeline-ru1276ed292277c9bebded38d907a517fe-mychildpipelinetask",
+		},
+	}, {
+		name:   "new child pipelinerun, pipelinetask and pipelinerun with long name",
+		ptName: "mychildpipelinetask-0123456789-0123456789-0123456789-0123456789-0123456789",
+		prName: "pipeline-run-0123456789-0123456789-0123456789-0123456789",
+		wantCprNames: []string{
+			"pipeline-run-0123456789-012345628c128b6df49e753c1f628b073961e99",
+		},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			testPrName := prName
+			if tc.prName != "" {
+				testPrName = tc.prName
+			}
+			namesOfChildPipelineRunsFromChildRefs := GetNamesOfTaskRuns(childRefs, tc.ptName, testPrName, 1)
+			sort.Strings(namesOfChildPipelineRunsFromChildRefs)
+			if d := cmp.Diff(tc.wantCprNames, namesOfChildPipelineRunsFromChildRefs); d != "" {
+				t.Errorf("GetNamesOfChildPipelineRuns: %s", diff.PrintWantGot(d))
+			}
+		})
+	}
+}
+
 func TestIsMatrixed(t *testing.T) {
 	pr := v1.PipelineRun{
 		ObjectMeta: metav1.ObjectMeta{
