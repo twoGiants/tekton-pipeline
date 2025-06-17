@@ -2638,6 +2638,53 @@ func TestResolvePipelineRun_CustomTask(t *testing.T) {
 	}
 }
 
+func TestResolvePipelineRun_ChildPipeline(t *testing.T) {
+	cfg := config.NewStore(logtesting.TestLogger(t))
+	ctx := cfg.ToContext(t.Context())
+
+	parentPr := v1.PipelineRun{ObjectMeta: metav1.ObjectMeta{Name: "pipelinerun"}}
+	pinpPts := []v1.PipelineTask{pts[21], pts[22]}
+	getChildPipelineRun := func(name string) (*v1.PipelineRun, error) {
+		if name == "pipelinerun-mytask23" {
+			return &prs[1], nil
+		}
+		return nil, kerrors.NewNotFound(v1.Resource("pipelinerun"), name)
+	}
+	expectedState := PipelineRunState{{
+		PipelineTask:          &pinpPts[0],
+		ChildPipelineRunNames: []string{"pipelinerun-mytask22"},
+		ChildPipelineRuns:     nil,
+		ResolvedPipeline:      ResolvedPipeline{PipelineSpec: pinpPts[0].PipelineSpec},
+	}, {
+		PipelineTask:          &pinpPts[1],
+		ChildPipelineRunNames: []string{"pipelinerun-mytask23"},
+		ChildPipelineRuns:     []*v1.PipelineRun{&prs[1]},
+		ResolvedPipeline:      ResolvedPipeline{PipelineSpec: pinpPts[1].PipelineSpec},
+	}}
+	actualState := PipelineRunState{}
+
+	for _, pipelineTask := range pinpPts {
+		ps, err := ResolvePipelineTask(
+			ctx,
+			parentPr,
+			getChildPipelineRun,
+			nopGetTask,
+			nopGetTaskRun,
+			nopGetCustomRun,
+			pipelineTask,
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("ResolvePipelineTask: %v", err)
+		}
+		actualState = append(actualState, ps)
+	}
+
+	if d := cmp.Diff(expectedState, actualState); d != "" {
+		t.Errorf("Unexpected pipeline state: %s", diff.PrintWantGot(d))
+	}
+}
+
 func TestResolvePipelineRun_PipelineTaskHasNoResources(t *testing.T) {
 	pts := []v1.PipelineTask{{
 		Name:    "mytask1",
@@ -2698,7 +2745,7 @@ func TestResolvePipelineRun_PipelineTaskHasPipelineRef(t *testing.T) {
 	if err == nil {
 		t.Errorf("Error getting tasks for fake pipeline %s, expected an error but got nil.", p.ObjectMeta.Name)
 	}
-	if !strings.Contains(err.Error(), "does not support PipelineRef or PipelineSpec") {
+	if !strings.Contains(err.Error(), "does not support PipelineRef, please use PipelineSpec, TaskRef or TaskSpec instead") {
 		t.Errorf("Error getting tasks for fake pipeline %s: expected contains keyword but got %s", p.ObjectMeta.Name, err)
 	}
 }
