@@ -5083,6 +5083,13 @@ func TestGetReason(t *testing.T) {
 			},
 		},
 		{
+			name: "child pipelinerun created but the conditions were not initialized",
+			rpt: ResolvedPipelineTask{
+				PipelineTask:      &pts[21],
+				ChildPipelineRuns: []*v1.PipelineRun{&prs[0]},
+			},
+		},
+		{
 			name: "taskrun not started",
 			rpt: ResolvedPipelineTask{
 				PipelineTask: &v1.PipelineTask{Name: "task"},
@@ -5093,6 +5100,12 @@ func TestGetReason(t *testing.T) {
 			rpt: ResolvedPipelineTask{
 				PipelineTask: &v1.PipelineTask{Name: "task"},
 				CustomTask:   true,
+			},
+		},
+		{
+			name: "child pipelinerun not started",
+			rpt: ResolvedPipelineTask{
+				PipelineTask: &pts[21],
 			},
 		},
 		{
@@ -5108,6 +5121,13 @@ func TestGetReason(t *testing.T) {
 				PipelineTask: &v1.PipelineTask{Name: "task"},
 				CustomTask:   true,
 				CustomRuns:   []*v1beta1.CustomRun{makeCustomRunStarted(customRuns[0])},
+			},
+		},
+		{
+			name: "child pipelinerun running",
+			rpt: ResolvedPipelineTask{
+				PipelineTask:      &pts[21],
+				ChildPipelineRuns: []*v1.PipelineRun{makePipelineRunStarted(prs[0])},
 			},
 		},
 		{
@@ -5128,6 +5148,14 @@ func TestGetReason(t *testing.T) {
 			want: "Succeeded",
 		},
 		{
+			name: "child pipelinerun succeeded",
+			rpt: ResolvedPipelineTask{
+				PipelineTask:      &pts[21],
+				ChildPipelineRuns: []*v1.PipelineRun{makePipelineRunSucceeded(prs[0])},
+			},
+			want: "Succeeded",
+		},
+		{
 			name: "taskrun failed",
 			rpt: ResolvedPipelineTask{
 				PipelineTask: &v1.PipelineTask{Name: "task"},
@@ -5141,6 +5169,14 @@ func TestGetReason(t *testing.T) {
 				PipelineTask: &v1.PipelineTask{Name: "task"},
 				CustomTask:   true,
 				CustomRuns:   []*v1beta1.CustomRun{makeCustomRunFailed(customRuns[0])},
+			},
+			want: "Failed",
+		},
+		{
+			name: "child pipelinerun failed",
+			rpt: ResolvedPipelineTask{
+				PipelineTask:      &pts[21],
+				ChildPipelineRuns: []*v1.PipelineRun{makePipelineRunFailed(prs[0])},
 			},
 			want: "Failed",
 		},
