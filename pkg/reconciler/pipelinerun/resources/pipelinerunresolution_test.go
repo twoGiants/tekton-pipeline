@@ -4349,6 +4349,12 @@ func TestIsSuccessful(t *testing.T) {
 		},
 		want: false,
 	}, {
+		name: "child pipelinerun not started",
+		rpt: ResolvedPipelineTask{
+			PipelineTask: &pts[21],
+		},
+		want: false,
+	}, {
 		name: "taskrun running",
 		rpt: ResolvedPipelineTask{
 			PipelineTask: &v1.PipelineTask{Name: "task"},
@@ -4361,6 +4367,13 @@ func TestIsSuccessful(t *testing.T) {
 			PipelineTask: &v1.PipelineTask{Name: "task"},
 			CustomTask:   true,
 			CustomRuns:   []*v1beta1.CustomRun{makeCustomRunStarted(customRuns[0])},
+		},
+		want: false,
+	}, {
+		name: "child pipelinerun running",
+		rpt: ResolvedPipelineTask{
+			PipelineTask:      &pts[21],
+			ChildPipelineRuns: []*v1.PipelineRun{makePipelineRunStarted(prs[0])},
 		},
 		want: false,
 	}, {
@@ -4379,6 +4392,13 @@ func TestIsSuccessful(t *testing.T) {
 		},
 		want: true,
 	}, {
+		name: "child pipelinerun succeeded",
+		rpt: ResolvedPipelineTask{
+			PipelineTask:      &pts[21],
+			ChildPipelineRuns: []*v1.PipelineRun{makePipelineRunSucceeded(prs[0])},
+		},
+		want: true,
+	}, {
 		name: "taskrun failed",
 		rpt: ResolvedPipelineTask{
 			PipelineTask: &v1.PipelineTask{Name: "task"},
@@ -4391,6 +4411,13 @@ func TestIsSuccessful(t *testing.T) {
 			PipelineTask: &v1.PipelineTask{Name: "task"},
 			CustomTask:   true,
 			CustomRuns:   []*v1beta1.CustomRun{makeCustomRunFailed(customRuns[0])},
+		},
+		want: false,
+	}, {
+		name: "child pipelinerun failed",
+		rpt: ResolvedPipelineTask{
+			PipelineTask:      &pts[21],
+			ChildPipelineRuns: []*v1.PipelineRun{makePipelineRunFailed(prs[0])},
 		},
 		want: false,
 	}, {
