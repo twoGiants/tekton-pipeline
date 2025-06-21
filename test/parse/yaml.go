@@ -211,3 +211,10 @@ func MustParseCustomRunWithObjectMeta(t *testing.T, objectMeta metav1.ObjectMeta
 	return r
 }
 
+// MustParseChildPipelineRunWithObjectMeta parses YAML to *v1.PipelineRun and adds objectMeta to it
+func MustParseChildPipelineRunWithObjectMeta(t *testing.T, objectMeta metav1.ObjectMeta, asYAML string) *v1.PipelineRun {
+	t.Helper()
+	pr := MustParseV1PipelineRun(t, asYAML)
+	pr.ObjectMeta = objectMeta
+	return pr
+}
