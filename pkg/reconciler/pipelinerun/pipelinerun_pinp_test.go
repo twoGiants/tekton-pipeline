@@ -278,3 +278,76 @@ func TestReconcile_NestedChildPipelineRuns(t *testing.T) {
 		[]*v1.PipelineRun{expectedGrandchildPipelineRun},
 	)
 }
+
+func TestReconcile_PropagateLabelsAndAnnotationsToChildPipelineRun(t *testing.T) {
+	names.TestingSeed()
+	// GIVEN
+	namespace := "foo"
+	parentPipeline,
+		parentPipelineRun,
+		expectedChildPipelineRun := th.OnePipelineInPipeline(t, namespace, "parent-pipeline-run")
+	expectedChildPipelineRun = th.WithAnnotationAndLabel(expectedChildPipelineRun, false)
+	testData := test.Data{
+		PipelineRuns: []*v1.PipelineRun{th.WithAnnotationAndLabel(parentPipelineRun, true)},
+		Pipelines:    []*v1.Pipeline{parentPipeline},
+		ConfigMaps:   []*corev1.ConfigMap{withEnabledAlphaAPIFields(newFeatureFlagsConfigMap())},
+	}
+
+	// WHEN
+	reconciledRun, childPipelineRuns := reconcileOncePinP(
+		t,
+		testData,
+		namespace,
+		parentPipelineRun.Name,
+		[]string{},
+	)
+
+	// THEN
+	validatePinP(
+		t,
+		reconciledRun.Status,
+		reconciledRun.Name,
+		childPipelineRuns,
+		[]*v1.PipelineRun{expectedChildPipelineRun},
+	)
+}
+
+func TestReconcile_ChildPipelineRunHasDefaultLabels(t *testing.T) {
+	names.TestingSeed()
+	// GIVEN
+	namespace := "foo"
+	parentPipeline,
+		parentPipelineRun,
+		expectedChildPipelineRun := th.OnePipelineInPipeline(t, namespace, "parent-pipeline-run")
+	expectedLabels := map[string]string{
+		pipeline.PipelineRunLabelKey:    parentPipelineRun.Name,
+		pipeline.PipelineLabelKey:       parentPipelineRun.Spec.PipelineRef.Name,
+		pipeline.PipelineRunUIDLabelKey: string(parentPipelineRun.UID),
+		pipeline.PipelineTaskLabelKey:   parentPipeline.Spec.Tasks[0].Name,
+		pipeline.MemberOfLabelKey:       v1.PipelineTasks,
+	}
+	testData := test.Data{
+		PipelineRuns: []*v1.PipelineRun{parentPipelineRun},
+		Pipelines:    []*v1.Pipeline{parentPipeline},
+		ConfigMaps:   []*corev1.ConfigMap{withEnabledAlphaAPIFields(newFeatureFlagsConfigMap())},
+	}
+
+	// WHEN
+	_, childPipelineRuns := reconcileOncePinP(
+		t,
+		testData,
+		namespace,
+		parentPipelineRun.Name,
+		[]string{},
+	)
+
+	// THEN
+	validateChildPipelineRunCount(t, childPipelineRuns, 1)
+
+	child := childPipelineRuns[expectedChildPipelineRun.Name]
+	for k, v := range expectedLabels {
+		if childPipelineRuns[expectedChildPipelineRun.Name].Labels[k] != v {
+			t.Errorf("Expected label %q=%q on child PipelineRun, got %q", k, v, child.Labels[k])
+		}
+	}
+}
