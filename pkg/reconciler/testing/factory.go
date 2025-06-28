@@ -169,6 +169,24 @@ spec:
 	return parentPipeline, parentPipelineRun, expectedChildPipelineRun
 }
 
+func WithAnnotationAndLabel(pr *v1.PipelineRun, withUnused bool) *v1.PipelineRun {
+	if pr.Annotations == nil {
+		pr.Annotations = map[string]string{}
+	}
+	pr.Annotations["tekton.test/annotation"] = "test-annotation-value"
+
+	if pr.Labels == nil {
+		pr.Labels = map[string]string{}
+	}
+	pr.Labels["tekton.test/label"] = "test-label-value"
+
+	if withUnused {
+		pr.Labels["tekton.dev/pipeline"] = "will-not-be-used"
+	}
+
+	return pr
+}
+
 func childPipelineRunWithObjectMeta(
 	childPipelineRunName,
 	ns,

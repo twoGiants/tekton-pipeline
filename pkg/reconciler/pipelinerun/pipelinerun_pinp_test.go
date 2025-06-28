@@ -278,3 +278,36 @@ func TestReconcile_NestedChildPipelineRuns(t *testing.T) {
 		[]*v1.PipelineRun{expectedGrandchildPipelineRun},
 	)
 }
+
+func TestReconcile_PropagateLabelsAndAnnotationsToChild(t *testing.T) {
+	names.TestingSeed()
+	// GIVEN
+	namespace := "foo"
+	parentPipeline,
+		parentPipelineRun,
+		expectedChildPipelineRun := th.OnePipelineInPipeline(t, namespace, "parent-pipeline-run")
+	expectedChildPipelineRun = th.WithAnnotationAndLabel(expectedChildPipelineRun, false)
+	testData := test.Data{
+		PipelineRuns: []*v1.PipelineRun{th.WithAnnotationAndLabel(parentPipelineRun, true)},
+		Pipelines:    []*v1.Pipeline{parentPipeline},
+		ConfigMaps:   []*corev1.ConfigMap{withEnabledAlphaAPIFields(newFeatureFlagsConfigMap())},
+	}
+
+	// WHEN
+	reconciledRun, childPipelineRuns := reconcileOncePinP(
+		t,
+		testData,
+		namespace,
+		parentPipelineRun.Name,
+		[]string{},
+	)
+
+	// THEN
+	validatePinP(
+		t,
+		reconciledRun.Status,
+		reconciledRun.Name,
+		childPipelineRuns,
+		[]*v1.PipelineRun{expectedChildPipelineRun},
+	)
+}
