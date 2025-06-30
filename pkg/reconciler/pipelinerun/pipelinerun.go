@@ -1012,7 +1012,7 @@ func (c *Reconciler) createChildPipelineRuns(
 		var params v1.Params
 		childPipelineRun, err := c.createChildPipelineRun(ctx, childPipelineRunName, params, rpt, pr, facts)
 		if err != nil {
-			err := c.handleRunCreationError(ctx, pr, err)
+			err := c.handleRunCreationError(pr, err)
 			return nil, err
 		}
 		childPipelineRuns = append(childPipelineRuns, childPipelineRun)
@@ -1040,8 +1040,8 @@ func (c *Reconciler) createChildPipelineRun(
 			Name:            childPipelineRunName,
 			Namespace:       pr.Namespace,
 			OwnerReferences: []metav1.OwnerReference{*kmeta.NewControllerRef(pr)},
-			Labels:          getTaskrunLabels(pr, rpt.PipelineTask.Name, true),
-			Annotations:     getTaskrunAnnotations(pr),
+			Labels:          createChildResourceLabels(pr, rpt.PipelineTask.Name, true),
+			Annotations:     createChildResourceAnnotations(pr),
 		},
 		Spec: v1.PipelineRunSpec{
 			PipelineSpec: rpt.PipelineTask.PipelineSpec,
@@ -1093,7 +1093,7 @@ func (c *Reconciler) createTaskRuns(ctx context.Context, rpt *resources.Resolved
 		}
 		taskRun, err := c.createTaskRun(ctx, taskRunName, params, rpt, pr, facts)
 		if err != nil {
-			err := c.handleRunCreationError(ctx, pr, err)
+			err := c.handleRunCreationError(pr, err)
 			return nil, err
 		}
 		taskRuns = append(taskRuns, taskRun)
@@ -1168,12 +1168,13 @@ func (c *Reconciler) createTaskRun(ctx context.Context, taskRunName string, para
 }
 
 // handleRunCreationError marks the PipelineRun as failed and returns a permanent error if the run creation error is not retryable
-func (c *Reconciler) handleRunCreationError(ctx context.Context, pr *v1.PipelineRun, err error) error {
+func (c *Reconciler) handleRunCreationError(pr *v1.PipelineRun, err error) error {
 	if controller.IsPermanentError(err) {
 		pr.Status.MarkFailed(v1.PipelineRunReasonCreateRunFailed.String(), err.Error())
 		return err
 	}
-	// This is not a complete list of permanent errors. Any permanent error with TaskRun/CustomRun creation can be added here.
+	// This is not a complete list of permanent errors. Any permanent error with child (PinP)
+	// PipelinRun/TaskRun/CustomRun creation can be added here.
 	if apierrors.IsInvalid(err) || apierrors.IsBadRequest(err) {
 		pr.Status.MarkFailed(v1.PipelineRunReasonCreateRunFailed.String(), err.Error())
 		return controller.NewPermanentError(err)
@@ -1197,7 +1198,7 @@ func (c *Reconciler) createCustomRuns(ctx context.Context, rpt *resources.Resolv
 		}
 		customRun, err := c.createCustomRun(ctx, customRunName, params, rpt, pr, facts)
 		if err != nil {
-			err := c.handleRunCreationError(ctx, pr, err)
+			err := c.handleRunCreationError(pr, err)
 			return nil, err
 		}
 		customRuns = append(customRuns, customRun)
@@ -1226,8 +1227,8 @@ func (c *Reconciler) createCustomRun(ctx context.Context, runName string, params
 		Name:            runName,
 		Namespace:       pr.Namespace,
 		OwnerReferences: []metav1.OwnerReference{*kmeta.NewControllerRef(pr)},
-		Labels:          getTaskrunLabels(pr, rpt.PipelineTask.Name, true),
-		Annotations:     getTaskrunAnnotations(pr),
+		Labels:          createChildResourceLabels(pr, rpt.PipelineTask.Name, true),
+		Annotations:     createChildResourceAnnotations(pr),
 	}
 
 	// TaskRef, Params and Workspaces are converted to v1beta1 since CustomRuns
@@ -1425,8 +1426,8 @@ func combinedSubPath(workspaceSubPath string, pipelineTaskSubPath string) string
 	return filepath.Join(workspaceSubPath, pipelineTaskSubPath)
 }
 
-func getTaskrunAnnotations(pr *v1.PipelineRun) map[string]string {
-	// Propagate annotations from PipelineRun to TaskRun.
+func createChildResourceAnnotations(pr *v1.PipelineRun) map[string]string {
+	// propagate annotations from PipelineRun to child (PinP) PipelineRun/TaskRun/CustomRun
 	annotations := make(map[string]string, len(pr.ObjectMeta.Annotations)+1)
 	for key, val := range pr.ObjectMeta.Annotations {
 		annotations[key] = val
@@ -1472,10 +1473,10 @@ func propagatePipelineNameLabelToPipelineRun(pr *v1.PipelineRun) error {
 	return nil
 }
 
-func getTaskrunLabels(pr *v1.PipelineRun, pipelineTaskName string, includePipelineLabels bool) map[string]string {
-	// Propagate labels from PipelineRun to TaskRun.
+func createChildResourceLabels(pr *v1.PipelineRun, pipelineTaskName string, includePipelineRunLabels bool) map[string]string {
+	// propagate labels from PipelineRun to child (PinP) PipelineRun/TaskRun/CustomRun
 	labels := make(map[string]string, len(pr.ObjectMeta.Labels)+1)
-	if includePipelineLabels {
+	if includePipelineRunLabels {
 		for key, val := range pr.ObjectMeta.Labels {
 			labels[key] = val
 		}
@@ -1512,7 +1513,7 @@ func combineTaskRunAndTaskSpecLabels(pr *v1.PipelineRun, pipelineTask *v1.Pipeli
 		addMetadataByPrecedence(labels, taskRunSpec.Metadata.Labels)
 	}
 
-	addMetadataByPrecedence(labels, getTaskrunLabels(pr, pipelineTask.Name, true))
+	addMetadataByPrecedence(labels, createChildResourceLabels(pr, pipelineTask.Name, true))
 
 	if pipelineTask.TaskSpec != nil {
 		addMetadataByPrecedence(labels, pipelineTask.TaskSpecMetadata().Labels)
@@ -1529,7 +1530,7 @@ func combineTaskRunAndTaskSpecAnnotations(pr *v1.PipelineRun, pipelineTask *v1.P
 		addMetadataByPrecedence(annotations, taskRunSpec.Metadata.Annotations)
 	}
 
-	addMetadataByPrecedence(annotations, getTaskrunAnnotations(pr))
+	addMetadataByPrecedence(annotations, createChildResourceAnnotations(pr))
 
 	if pipelineTask.TaskSpec != nil {
 		addMetadataByPrecedence(annotations, pipelineTask.TaskSpecMetadata().Annotations)
@@ -1612,7 +1613,7 @@ func (c *Reconciler) updatePipelineRunStatusFromInformer(ctx context.Context, pr
 	// Get the parent PipelineRun label that is set on each child (PIP) PipelineRun/TaskRun/CustomRun. Do not include the propagated labels from the
 	// Pipeline and PipelineRun. The user could change them during the lifetime of the PipelineRun so the
 	// current labels may not be set on the previously created TaskRuns.
-	pipelineRunLabels := getTaskrunLabels(pr, "", false)
+	pipelineRunLabels := createChildResourceLabels(pr, "", false)
 	childPipelineRuns, err := c.pipelineRunLister.PipelineRuns(pr.Namespace).List(k8slabels.SelectorFromSet(pipelineRunLabels))
 	if err != nil {
 		logger.Errorf("Could not list PipelineRuns %#v", err)
