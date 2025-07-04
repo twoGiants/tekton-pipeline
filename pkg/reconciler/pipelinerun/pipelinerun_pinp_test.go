@@ -12,7 +12,12 @@ import (
 	"github.com/tektoncd/pipeline/test/diff"
 	"github.com/tektoncd/pipeline/test/names"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	ktesting "k8s.io/client-go/testing"
 )
 
 // TestReconcile_ChildPipelineRunPipelineSpec verifies the reconciliation logic for PipelineRuns that create child
@@ -350,4 +355,106 @@ func TestReconcile_ChildPipelineRunHasDefaultLabels(t *testing.T) {
 			t.Errorf("Expected label %q=%q on child PipelineRun, got %q", k, v, child.Labels[k])
 		}
 	}
+}
+
+func TestReconcile_ChildPipelineRunCreationError(t *testing.T) {
+	names.TestingSeed()
+	// GIVEN
+	namespace := "foo"
+	parentPipeline,
+		parentPipelineRun,
+		expectedChildPipelineRun := th.OnePipelineInPipeline(t, namespace, "parent-pipeline-run")
+	testData := test.Data{
+		PipelineRuns: []*v1.PipelineRun{parentPipelineRun},
+		Pipelines:    []*v1.Pipeline{parentPipeline},
+		ConfigMaps:   []*corev1.ConfigMap{withEnabledAlphaAPIFields(newFeatureFlagsConfigMap())},
+	}
+	testCases := []struct {
+		name        string
+		creationErr clientError
+	}{
+		{
+			name: "invalid",
+			creationErr: clientError{
+				verb:     "create",
+				resource: "pipelineruns",
+				actualError: apierrors.NewInvalid(
+					schema.GroupKind{},
+					expectedChildPipelineRun.Name,
+					field.ErrorList{}),
+			},
+		},
+		{
+			name: "bad request",
+			creationErr: clientError{
+				verb:        "create",
+				resource:    "pipelineruns",
+				actualError: apierrors.NewBadRequest("bad request"),
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// WHEN
+			reconciledRun := reconcileWithError(
+				t,
+				testData,
+				namespace,
+				parentPipelineRun.Name,
+				tc.creationErr,
+			)
+
+			// THEN
+			th.CheckPipelineRunConditionStatusAndReason(
+				t,
+				reconciledRun.Status,
+				corev1.ConditionFalse,
+				"CreateRunFailed",
+			)
+
+			if reconciledRun.Status.CompletionTime == nil {
+				t.Errorf("Expected a CompletionTime on invalid PipelineRun but was nil")
+			}
+		})
+	}
+}
+
+type clientError struct {
+	verb,
+	resource string
+	actualError error
+}
+
+func reconcileWithError(
+	t *testing.T,
+	testData test.Data,
+	namespace,
+	pipelineRunName string,
+	clientErr clientError,
+) *v1.PipelineRun {
+	t.Helper()
+
+	prt := newPipelineRunTest(t, testData)
+	defer prt.Cancel()
+
+	// simulate error when creating child resource
+	prt.TestAssets.Clients.
+		Pipeline.
+		PrependReactor(
+			clientErr.verb,
+			clientErr.resource,
+			func(_ ktesting.Action) (bool, runtime.Object, error) {
+				return true, nil, clientErr.actualError
+			},
+		)
+
+	reconciledRun, _ := prt.reconcileRun(
+		namespace,
+		pipelineRunName,
+		[]string{},
+		true,
+	)
+
+	return reconciledRun
 }
