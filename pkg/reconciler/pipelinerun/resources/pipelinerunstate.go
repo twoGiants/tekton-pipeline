@@ -19,18 +19,14 @@ package resources
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
-	"github.com/tektoncd/pipeline/pkg/apis/pipeline"
 	v1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	"github.com/tektoncd/pipeline/pkg/reconciler/pipeline/dag"
-	"github.com/tektoncd/pipeline/pkg/substitution"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"knative.dev/pkg/apis"
@@ -293,99 +289,6 @@ func (facts *PipelineRunFacts) GetChildReferences() []v1.ChildStatusReference {
 		}
 	}
 	return childRefs
-}
-
-func (t *ResolvedPipelineTask) getDisplayName(pipelineRun *v1.PipelineRun, customRun *v1beta1.CustomRun, taskRun *v1.TaskRun, c v1.ChildStatusReference) v1.ChildStatusReference {
-	replacements := make(map[string]string)
-	if pipelineRun != nil {
-		for _, p := range pipelineRun.Spec.Params {
-			if p.Value.Type == v1.ParamTypeString {
-				replacements[fmt.Sprintf("%s.%s", v1.ParamsPrefix, p.Name)] = p.Value.StringVal
-			}
-		}
-	}
-
-	if taskRun != nil {
-		for _, p := range taskRun.Spec.Params {
-			if p.Value.Type == v1.ParamTypeString {
-				replacements[fmt.Sprintf("%s.%s", v1.ParamsPrefix, p.Name)] = p.Value.StringVal
-			}
-		}
-	}
-
-	if customRun != nil {
-		for _, p := range customRun.Spec.Params {
-			if p.Value.Type == v1beta1.ParamTypeString {
-				replacements[fmt.Sprintf("%s.%s", v1.ParamsPrefix, p.Name)] = p.Value.StringVal
-			}
-		}
-	}
-
-	if t.PipelineTask.DisplayName != "" {
-		c.DisplayName = substitution.ApplyReplacements(t.PipelineTask.DisplayName, replacements)
-	}
-	if t.PipelineTask.Matrix != nil {
-		var dn string
-		for _, i := range t.PipelineTask.Matrix.Include {
-			if i.Name == "" {
-				continue
-			}
-			match := true
-			for _, ip := range i.Params {
-				v, ok := replacements[fmt.Sprintf("%s.%s", v1.ParamsPrefix, ip.Name)]
-				if !ok || (ip.Value.Type == v1.ParamTypeString && ip.Value.StringVal != v) {
-					match = false
-					break
-				}
-			}
-			if match {
-				dn = fmt.Sprintf("%s %s", dn, substitution.ApplyReplacements(i.Name, replacements))
-			}
-		}
-		if dn != "" {
-			c.DisplayName = strings.TrimSpace(dn)
-		}
-	}
-	return c
-}
-
-func (t *ResolvedPipelineTask) getChildRefForChildPipelineRun(pipelineRun *v1.PipelineRun) v1.ChildStatusReference {
-	c := v1.ChildStatusReference{
-		TypeMeta: runtime.TypeMeta{
-			APIVersion: v1.SchemeGroupVersion.String(),
-			Kind:       pipeline.PipelineRunControllerName,
-		},
-		Name:             pipelineRun.Name,
-		PipelineTaskName: t.PipelineTask.Name,
-		WhenExpressions:  t.PipelineTask.When,
-	}
-	return t.getDisplayName(pipelineRun, nil, nil, c)
-}
-
-func (t *ResolvedPipelineTask) getChildRefForRun(customRun *v1beta1.CustomRun) v1.ChildStatusReference {
-	c := v1.ChildStatusReference{
-		TypeMeta: runtime.TypeMeta{
-			APIVersion: v1beta1.SchemeGroupVersion.String(),
-			Kind:       pipeline.CustomRunControllerName,
-		},
-		Name:             customRun.GetObjectMeta().GetName(),
-		PipelineTaskName: t.PipelineTask.Name,
-		WhenExpressions:  t.PipelineTask.When,
-	}
-	return t.getDisplayName(nil, customRun, nil, c)
-}
-
-func (t *ResolvedPipelineTask) getChildRefForTaskRun(taskRun *v1.TaskRun) v1.ChildStatusReference {
-	c := v1.ChildStatusReference{
-		TypeMeta: runtime.TypeMeta{
-			APIVersion: v1.SchemeGroupVersion.String(),
-			Kind:       pipeline.TaskRunControllerName,
-		},
-		Name:             taskRun.Name,
-		PipelineTaskName: t.PipelineTask.Name,
-		WhenExpressions:  t.PipelineTask.When,
-	}
-	return t.getDisplayName(nil, nil, taskRun, c)
 }
 
 // getNextTasks returns a list of pipeline tasks which should be executed next i.e.

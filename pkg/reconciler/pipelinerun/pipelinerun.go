@@ -432,6 +432,98 @@ func (c *Reconciler) resolvePipelineState(
 	return pst, nil
 }
 
+func (c *Reconciler) resolvePipelineStateV2(
+	ctx context.Context,
+	pipelineTasks []v1.PipelineTask,
+	pipelineMeta *metav1.ObjectMeta,
+	pr *v1.PipelineRun,
+	pst resources.PipelineRunStateV2,
+) (resources.PipelineRunStateV2, error) {
+	ctx, span := c.tracerProvider.Tracer(TracerName).Start(ctx, "resolvePipelineState")
+	defer span.End()
+	// Resolve each pipeline task individually because they each could have a different reference context (remote or local).
+	for _, pipelineTask := range pipelineTasks {
+		// We need the TaskRun name to ensure that we don't perform an additional remote resolution request for a PipelineTask
+		// in the TaskRun reconciler.
+		trName := resources.GetTaskRunName(
+			pr.Status.ChildReferences,
+			pipelineTask.Name,
+			pr.Name,
+		)
+
+		// list VerificationPolicies for trusted resources
+		vp, err := c.verificationPolicyLister.VerificationPolicies(pr.Namespace).List(labels.Everything())
+		if err != nil {
+			return nil, fmt.Errorf("failed to list VerificationPolicies from namespace %s with error %w", pr.Namespace, err)
+		}
+
+		getChildPipelineRunFunc := func(name string) (*v1.PipelineRun, error) {
+			return c.pipelineRunLister.PipelineRuns(pr.Namespace).Get(name)
+		}
+
+		getTaskFunc := tresources.GetTaskFunc(
+			ctx,
+			c.KubeClientSet,
+			c.PipelineClientSet,
+			c.resolutionRequester,
+			pr,
+			pipelineTask.TaskRef,
+			trName,
+			pr.Namespace,
+			pr.Spec.TaskRunTemplate.ServiceAccountName,
+			vp,
+		)
+
+		getTaskRunFunc := func(name string) (*v1.TaskRun, error) {
+			return c.taskRunLister.TaskRuns(pr.Namespace).Get(name)
+		}
+
+		getCustomRunFunc := func(name string) (*v1beta1.CustomRun, error) {
+			r, err := c.customRunLister.CustomRuns(pr.Namespace).Get(name)
+			if err != nil {
+				return nil, err
+			}
+			return r, nil
+		}
+
+		resolvedTask, err := resources.ResolvePipelineTaskV2(ctx,
+			*pr,
+			getChildPipelineRunFunc,
+			getTaskFunc,
+			getTaskRunFunc,
+			getCustomRunFunc,
+			pipelineTask,
+			pst,
+		)
+		if err != nil {
+			if resolutioncommon.IsErrTransient(err) {
+				return nil, err
+			}
+			if errors.Is(err, remote.ErrRequestInProgress) {
+				return nil, err
+			}
+			var nfErr *resources.TaskNotFoundError
+			if errors.As(err, &nfErr) {
+				pr.Status.MarkFailed(v1.PipelineRunReasonCouldntGetTask.String(),
+					"Pipeline %s/%s can't be Run; it contains Tasks that don't exist: %s",
+					pipelineMeta.Namespace, pipelineMeta.Name, nfErr)
+			} else {
+				pr.Status.MarkFailed(v1.PipelineRunReasonFailedValidation.String(),
+					"PipelineRun %s/%s can't be Run; couldn't resolve all references: %s",
+					pipelineMeta.Namespace, pr.Name, pipelineErrors.WrapUserError(err))
+			}
+			return nil, controller.NewPermanentError(err)
+		}
+
+		if err := resolvedTask.UpdateConditionFromVerificationResult(pr); err != nil {
+			return nil, err
+		}
+		pst = append(pst, resolvedTask)
+	}
+
+	return pst, nil
+}
+
 func (c *Reconciler) reconcile(ctx context.Context, pr *v1.PipelineRun, getPipelineFunc rprp.GetPipeline, beforeCondition *apis.Condition) error {
 	ctx, span := c.tracerProvider.Tracer(TracerName).Start(ctx, "reconcile")
 	defer span.End()

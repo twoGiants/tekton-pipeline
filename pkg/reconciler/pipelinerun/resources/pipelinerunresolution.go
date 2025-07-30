@@ -35,6 +35,7 @@ import (
 	"github.com/tektoncd/pipeline/pkg/resolution/resource"
 	"github.com/tektoncd/pipeline/pkg/substitution"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/kmeta"
 )
@@ -675,7 +676,6 @@ func ResolvePipelineTask(
 		PipelineTask: &pipelineTask,
 	}
 	rpt.CustomTask = rpt.PipelineTask.TaskRef.IsCustomTask() || rpt.PipelineTask.TaskSpec.IsCustomTask()
-	numCombinations := 1
 	// We want to resolve all of the result references and ignore any errors at this point since there could be
 	// instances where result references are missing here, but will be later skipped and resolved in
 	// skipBecauseResultReferencesAreMissing. The final validation is handled in CheckMissingResultReferences.
@@ -686,6 +686,7 @@ func ResolvePipelineTask(
 
 	ApplyTaskResults(PipelineRunState{&rpt}, resolvedResultRefs)
 
+	numCombinations := 1
 	if rpt.PipelineTask.IsMatrixed() {
 		numCombinations = rpt.PipelineTask.Matrix.CountCombinations()
 	}
@@ -852,34 +853,6 @@ func GetTaskRunName(childRefs []v1.ChildStatusReference, ptName, prName string) 
 	return kmeta.ChildName(prName, "-"+ptName)
 }
 
-// GetNamesOfTaskRuns should return unique names for `TaskRuns` if one has not already been defined, and the existing one otherwise.
-func GetNamesOfTaskRuns(childRefs []v1.ChildStatusReference, ptName, prName string, numberOfTaskRuns int) []string {
-	if taskRunNames := getTaskRunNamesFromChildRefs(childRefs, ptName); taskRunNames != nil {
-		return taskRunNames
-	}
-	return getNewRunNames(ptName, prName, numberOfTaskRuns)
-}
-
-// GetNamesOfChildPipelineRuns should return unique names for child (PinP) `PipelineRuns` if one has not already been
-// defined, and the existing one otherwise.
-func GetNamesOfChildPipelineRuns(childRefs []v1.ChildStatusReference, ptName, prName string, numberOfPipelineRuns int) []string {
-	if pipelineRunNames := getChildPipelineRunNamesFromChildRefs(childRefs, ptName); pipelineRunNames != nil {
-		return pipelineRunNames
-	}
-	return getNewRunNames(ptName, prName, numberOfPipelineRuns)
-}
-
-// getTaskRunNamesFromChildRefs returns the names of TaskRuns defined in childRefs that are associated with the named Pipeline Task.
-func getTaskRunNamesFromChildRefs(childRefs []v1.ChildStatusReference, ptName string) []string {
-	var taskRunNames []string
-	for _, cr := range childRefs {
-		if cr.Kind == pipeline.TaskRunControllerName && cr.PipelineTaskName == ptName {
-			taskRunNames = append(taskRunNames, cr.Name)
-		}
-	}
-	return taskRunNames
-}
-
 func getNewRunNames(ptName, prName string, numberOfRuns int) []string {
 	var runNames []string
 	// If it is a singular PipelineRun/TaskRun/CustomRun, we only append the ptName
@@ -918,41 +891,6 @@ func getCustomRunName(childRefs []v1.ChildStatusReference, ptName, prName string
 	}
 
 	return kmeta.ChildName(prName, "-"+ptName)
-}
-
-// getNamesOfCustomRuns should return a unique names for `CustomRuns` if they have not already been defined,
-// and the existing ones otherwise.
-func getNamesOfCustomRuns(childRefs []v1.ChildStatusReference, ptName, prName string, numberOfRuns int) []string {
-	if customRunNames := getRunNamesFromChildRefs(childRefs, ptName); customRunNames != nil {
-		return customRunNames
-	}
-	return getNewRunNames(ptName, prName, numberOfRuns)
-}
-
-// getRunNamesFromChildRefs returns the names of CustomRuns defined in childRefs that are associated with the named Pipeline Task.
-func getRunNamesFromChildRefs(childRefs []v1.ChildStatusReference, ptName string) []string {
-	var runNames []string
-	for _, cr := range childRefs {
-		if cr.PipelineTaskName == ptName {
-			if cr.Kind == pipeline.CustomRunControllerName {
-				runNames = append(runNames, cr.Name)
-			}
-		}
-	}
-	return runNames
-}
-
-// ...
-func getChildPipelineRunNamesFromChildRefs(childRefs []v1.ChildStatusReference, ptName string) []string {
-	var childPipelineRunNames []string
-	for _, cr := range childRefs {
-		if cr.PipelineTaskName == ptName {
-			if cr.Kind == pipeline.PipelineRunControllerName {
-				childPipelineRunNames = append(childPipelineRunNames, cr.Name)
-			}
-		}
-	}
-	return childPipelineRunNames
 }
 
 func (t *ResolvedPipelineTask) hasResultReferences() bool {
@@ -1103,4 +1041,97 @@ func getParamFromName(name string, pss v1.ParamSpecs) v1.ParamSpec {
 		}
 	}
 	return v1.ParamSpec{}
+}
+
+func (t *ResolvedPipelineTask) getChildRefForChildPipelineRun(pipelineRun *v1.PipelineRun) v1.ChildStatusReference {
+	c := v1.ChildStatusReference{
+		TypeMeta: runtime.TypeMeta{
+			APIVersion: v1.SchemeGroupVersion.String(),
+			Kind:       pipeline.PipelineRunControllerName,
+		},
+		Name:             pipelineRun.Name,
+		PipelineTaskName: t.PipelineTask.Name,
+		WhenExpressions:  t.PipelineTask.When,
+	}
+	return t.getDisplayName(pipelineRun, nil, nil, c)
+}
+
+func (t *ResolvedPipelineTask) getChildRefForRun(customRun *v1beta1.CustomRun) v1.ChildStatusReference {
+	c := v1.ChildStatusReference{
+		TypeMeta: runtime.TypeMeta{
+			APIVersion: v1beta1.SchemeGroupVersion.String(),
+			Kind:       pipeline.CustomRunControllerName,
+		},
+		Name:             customRun.GetObjectMeta().GetName(),
+		PipelineTaskName: t.PipelineTask.Name,
+		WhenExpressions:  t.PipelineTask.When,
+	}
+	return t.getDisplayName(nil, customRun, nil, c)
+}
+
+func (t *ResolvedPipelineTask) getChildRefForTaskRun(taskRun *v1.TaskRun) v1.ChildStatusReference {
+	c := v1.ChildStatusReference{
+		TypeMeta: runtime.TypeMeta{
+			APIVersion: v1.SchemeGroupVersion.String(),
+			Kind:       pipeline.TaskRunControllerName,
+		},
+		Name:             taskRun.Name,
+		PipelineTaskName: t.PipelineTask.Name,
+		WhenExpressions:  t.PipelineTask.When,
+	}
+	return t.getDisplayName(nil, nil, taskRun, c)
+}
+
+func (t *ResolvedPipelineTask) getDisplayName(pipelineRun *v1.PipelineRun, customRun *v1beta1.CustomRun, taskRun *v1.TaskRun, c v1.ChildStatusReference) v1.ChildStatusReference {
+	replacements := make(map[string]string)
+	if pipelineRun != nil {
+		for _, p := range pipelineRun.Spec.Params {
+			if p.Value.Type == v1.ParamTypeString {
+				replacements[fmt.Sprintf("%s.%s", v1.ParamsPrefix, p.Name)] = p.Value.StringVal
+			}
+		}
+	}
+
+	if taskRun != nil {
+		for _, p := range taskRun.Spec.Params {
+			if p.Value.Type == v1.ParamTypeString {
+				replacements[fmt.Sprintf("%s.%s", v1.ParamsPrefix, p.Name)] = p.Value.StringVal
+			}
+		}
+	}
+
+	if customRun != nil {
+		for _, p := range customRun.Spec.Params {
+			if p.Value.Type == v1beta1.ParamTypeString {
+				replacements[fmt.Sprintf("%s.%s", v1.ParamsPrefix, p.Name)] = p.Value.StringVal
+			}
+		}
+	}
+
+	if t.PipelineTask.DisplayName != "" {
+		c.DisplayName = substitution.ApplyReplacements(t.PipelineTask.DisplayName, replacements)
+	}
+	if t.PipelineTask.Matrix != nil {
+		var dn string
+		for _, i := range t.PipelineTask.Matrix.Include {
+			if i.Name == "" {
+				continue
+			}
+			match := true
+			for _, ip := range i.Params {
+				v, ok := replacements[fmt.Sprintf("%s.%s", v1.ParamsPrefix, ip.Name)]
+				if !ok || (ip.Value.Type == v1.ParamTypeString && ip.Value.StringVal != v) {
+					match = false
+					break
+				}
+			}
+			if match {
+				dn = fmt.Sprintf("%s %s", dn, substitution.ApplyReplacements(i.Name, replacements))
+			}
+		}
+		if dn != "" {
+			c.DisplayName = strings.TrimSpace(dn)
+		}
+	}
+	return c
 }
