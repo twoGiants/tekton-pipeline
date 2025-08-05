@@ -233,33 +233,42 @@ func ApplyTaskResults(targets PipelineRunState, resolvedResultRefs ResolvedResul
 	stringReplacements := resolvedResultRefs.getStringReplacements()
 	arrayReplacements := resolvedResultRefs.getArrayReplacements()
 	objectReplacements := resolvedResultRefs.getObjectReplacements()
-	for _, resolvedPipelineRunTask := range targets {
-		if resolvedPipelineRunTask.PipelineTask != nil {
-			pipelineTask := resolvedPipelineRunTask.PipelineTask.DeepCopy()
-			pipelineTask.Params = pipelineTask.Params.ReplaceVariables(stringReplacements, arrayReplacements, objectReplacements)
-			if pipelineTask.IsMatrixed() {
-				// Matrixed pipeline results replacements support:
-				// 1. String replacements from string, array or object results
-				// 2. array replacements from array results are supported
-				pipelineTask.Matrix.Params = pipelineTask.Matrix.Params.ReplaceVariables(stringReplacements, arrayReplacements, nil)
-				for i := range pipelineTask.Matrix.Include {
-					// matrix include parameters can only be type string
-					pipelineTask.Matrix.Include[i].Params = pipelineTask.Matrix.Include[i].Params.ReplaceVariables(stringReplacements, nil, nil)
-				}
-			}
-			pipelineTask.When = pipelineTask.When.ReplaceVariables(stringReplacements, arrayReplacements)
-			if pipelineTask.TaskRef != nil {
-				if pipelineTask.TaskRef.Params != nil {
-					pipelineTask.TaskRef.Params = pipelineTask.TaskRef.Params.ReplaceVariables(stringReplacements, arrayReplacements, objectReplacements)
-				}
-				pipelineTask.TaskRef.Name = substitution.ApplyReplacements(pipelineTask.TaskRef.Name, stringReplacements)
-			}
-			pipelineTask.DisplayName = substitution.ApplyReplacements(pipelineTask.DisplayName, stringReplacements)
-			for i, workspace := range pipelineTask.Workspaces {
-				pipelineTask.Workspaces[i].SubPath = substitution.ApplyReplacements(workspace.SubPath, stringReplacements)
-			}
-			resolvedPipelineRunTask.PipelineTask = pipelineTask
+	for _, rpt := range targets {
+		if rpt.PipelineTask == nil {
+			continue
 		}
+
+		pipelineTask := rpt.PipelineTask.DeepCopy()
+
+		pipelineTask.Params = pipelineTask.Params.ReplaceVariables(stringReplacements, arrayReplacements, objectReplacements)
+		pipelineTask.When = pipelineTask.When.ReplaceVariables(stringReplacements, arrayReplacements)
+		pipelineTask.DisplayName = substitution.ApplyReplacements(pipelineTask.DisplayName, stringReplacements)
+
+		if pipelineTask.IsMatrixed() {
+			// Matrixed pipeline results replacements support:
+			// 1. String replacements from string, array or object results
+			// 2. array replacements from array results are supported
+			pipelineTask.Matrix.Params = pipelineTask.Matrix.Params.ReplaceVariables(stringReplacements, arrayReplacements, nil)
+
+			for i := range pipelineTask.Matrix.Include {
+				// matrix include parameters can only be type string
+				pipelineTask.Matrix.Include[i].Params = pipelineTask.Matrix.Include[i].Params.ReplaceVariables(stringReplacements, nil, nil)
+			}
+		}
+
+		if pipelineTask.TaskRef != nil {
+			pipelineTask.TaskRef.Name = substitution.ApplyReplacements(pipelineTask.TaskRef.Name, stringReplacements)
+
+			if pipelineTask.TaskRef.Params != nil {
+				pipelineTask.TaskRef.Params = pipelineTask.TaskRef.Params.ReplaceVariables(stringReplacements, arrayReplacements, objectReplacements)
+			}
+		}
+
+		for i, workspace := range pipelineTask.Workspaces {
+			pipelineTask.Workspaces[i].SubPath = substitution.ApplyReplacements(workspace.SubPath, stringReplacements)
+		}
+
+		rpt.PipelineTask = pipelineTask
 	}
 }
 

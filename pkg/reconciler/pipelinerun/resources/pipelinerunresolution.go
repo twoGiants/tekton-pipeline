@@ -607,7 +607,7 @@ func ResolvePipelineTask(
 		PipelineTask: &pipelineTask,
 	}
 	rpt.CustomTask = rpt.PipelineTask.TaskRef.IsCustomTask() || rpt.PipelineTask.TaskSpec.IsCustomTask()
-	numCombinations := 1
+
 	// We want to resolve all of the result references and ignore any errors at this point since there could be
 	// instances where result references are missing here, but will be later skipped and resolved in
 	// skipBecauseResultReferencesAreMissing. The final validation is handled in CheckMissingResultReferences.
@@ -615,12 +615,13 @@ func ResolvePipelineTask(
 	if err := validateArrayResultsIndex(resolvedResultRefs); err != nil {
 		return nil, err
 	}
-
 	ApplyTaskResults(PipelineRunState{&rpt}, resolvedResultRefs)
 
+	numCombinations := 1
 	if rpt.PipelineTask.IsMatrixed() {
 		numCombinations = rpt.PipelineTask.Matrix.CountCombinations()
 	}
+
 	if rpt.IsCustomTask() {
 		rpt.CustomRunNames = getNamesOfCustomRuns(pipelineRun.Status.ChildReferences, pipelineTask.Name, pipelineRun.Name, numCombinations)
 		for _, runName := range rpt.CustomRunNames {
