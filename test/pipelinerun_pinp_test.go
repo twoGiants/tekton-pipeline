@@ -101,7 +101,7 @@ func assertPinP(
 	)
 	t.Logf("Checking that labels were propagated correctly for child PipelineRun %q", actualCpr.Name)
 	directParentPrName := actualCpr.OwnerReferences[0].Name
-	checkLabelPropagationToChildPipelineRun(ctx, t, c, namespace, directParentPrName, actualCpr)
+	checkLabelPropagationToChildPipelineRun(ctx, t, c, directParentPrName, actualCpr)
 	t.Logf("Checking that annotations were propagated correctly for child PipelineRun %q", actualCpr.Name)
 	checkAnnotationPropagationToChildPipelineRun(ctx, t, c, namespace, directParentPrName, actualCpr)
 }
@@ -260,7 +260,6 @@ func checkLabelPropagationToChildPipelineRun(
 	ctx context.Context,
 	t *testing.T,
 	c *clients,
-	namespace string,
 	parentPrName string,
 	childPr *v1.PipelineRun,
 ) {
