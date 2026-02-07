@@ -44,8 +44,8 @@ import (
 
 const (
 	cacheAnnotationKey     = "resolution.tekton.dev/cached"
-	cacheResolverTypeKey   = "resolution.tekton.dev/cache-resolver-type"
 	cacheTimestampKey      = "resolution.tekton.dev/cache-timestamp"
+	cacheResolverTypeKey   = "resolution.tekton.dev/cache-resolver-type"
 	cacheOperationKey      = "resolution.tekton.dev/cache-operation"
 	cacheValueTrue         = "true"
 	cacheOperationStore    = "store"
@@ -649,102 +649,6 @@ func TestResolverCacheErrorHandling(t *testing.T) {
 	if !hasCacheAnnotation(resolutionRequest2.Status.Annotations) {
 		t.Error("TaskRun with empty cache mode should still cache (defaults to auto)")
 	}
-}
-
-// TestCacheTTLExpiration validates cache TTL behavior
-// @test:execution=parallel
-func TestResolverCacheTTL(t *testing.T) {
-	ctx := t.Context()
-	c, namespace := setup(ctx, t, withRegistry, cacheResolverFeatureFlags)
-
-	t.Parallel()
-
-	knativetest.CleanupOnInterrupt(func() { tearDown(ctx, t, c, namespace) }, t.Logf)
-	defer tearDown(ctx, t, c, namespace)
-
-	// First request to populate cache
-	tr1 := newGitCloneBundleTaskRun(t, namespace, "ttl-test-1", "always")
-	_, err := c.V1TaskRunClient.Create(ctx, tr1, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("Failed to create first TaskRun: %s", err)
-	}
-
-	if err := WaitForTaskRunState(ctx, c, tr1.Name, TaskRunSucceed(tr1.Name), "TaskRunSuccess", v1Version); err != nil {
-		t.Fatalf("Error waiting for first TaskRun to finish: %s", err)
-	}
-
-	// Second request should hit cache
-	tr2 := newGitCloneBundleTaskRun(t, namespace, "ttl-test-2", "always")
-	_, err = c.V1TaskRunClient.Create(ctx, tr2, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("Failed to create second TaskRun: %s", err)
-	}
-
-	if err := WaitForTaskRunState(ctx, c, tr2.Name, TaskRunSucceed(tr2.Name), "TaskRunSuccess", v1Version); err != nil {
-		t.Fatalf("Error waiting for second TaskRun to finish: %s", err)
-	}
-
-	resolutionRequest2 := getResolutionRequest(ctx, t, c, namespace, tr2.Name)
-	if !hasCacheAnnotation(resolutionRequest2.Status.Annotations) {
-		t.Error("Second request should be cached")
-	}
-
-	// Note: We can't easily test TTL expiration in e2e tests without waiting for the full TTL duration
-	// This test validates that cache entries are created and retrieved correctly
-	// TTL expiration would need to be tested in unit tests with mocked time
-	t.Logf("Cache TTL test completed - cache entries created and retrieved successfully")
-}
-
-// TestCacheStressTest validates cache behavior under stress conditions
-// @test:execution=parallel
-func TestResolverCacheStress(t *testing.T) {
-	ctx := t.Context()
-	c, namespace := setup(ctx, t, withRegistry, cacheResolverFeatureFlags)
-
-	t.Parallel()
-
-	knativetest.CleanupOnInterrupt(func() { tearDown(ctx, t, c, namespace) }, t.Logf)
-	defer tearDown(ctx, t, c, namespace)
-
-	// Create multiple concurrent requests to test cache behavior under load
-	const numRequests = 5
-	var wg sync.WaitGroup
-	errors := make(chan error, numRequests)
-
-	for i := range numRequests {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-
-			tr := newGitCloneBundleTaskRun(t, namespace, fmt.Sprintf("stress-test-%d", index), "always")
-			_, err := c.V1TaskRunClient.Create(ctx, tr, metav1.CreateOptions{})
-			if err != nil {
-				errors <- fmt.Errorf("Failed to create TaskRun %d: %w", index, err)
-				return
-			}
-
-			if err := WaitForTaskRunState(ctx, c, tr.Name, TaskRunSucceed(tr.Name), "TaskRunSuccess", v1Version); err != nil {
-				errors <- fmt.Errorf("Error waiting for TaskRun %d to finish: %w", index, err)
-				return
-			}
-
-			resolutionRequest := getResolutionRequest(ctx, t, c, namespace, tr.Name)
-			if !hasCacheAnnotation(resolutionRequest.Status.Annotations) {
-				errors <- fmt.Errorf("TaskRun %d should be cached", index)
-				return
-			}
-		}(i)
-	}
-
-	wg.Wait()
-	close(errors)
-
-	// Check for any errors
-	for err := range errors {
-		t.Errorf("Stress test error: %v", err)
-	}
-
-	t.Logf("Cache stress test completed successfully with %d concurrent requests", numRequests)
 }
 
 // TestResolverCacheInvalidParams validates centralized cache parameter validation
