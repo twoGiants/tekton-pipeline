@@ -104,34 +104,36 @@ func (c *resolverCache) GetCachedOrResolveFromRemote(
 	}
 
 	// If cache miss, resolve from remote using singleflight
+	wasExecutor := false
 	untyped, err, shared := c.flightGroup.Do(key, func() (any, error) {
+		wasExecutor = true
 		resolved, err := resolveFromRemote()
 		if err != nil {
 			return nil, err
 		}
-
-		annotated := c.annotate(resolved, resolverType, cacheOperationStore)
-
-		// Store annotated resource with store operation and return annotated resource
-		// to indicate it was stored in cache
 
 		effectiveTTL := c.ttl
 		if resolverTTL := getResolverTTL(ctx); resolverTTL > 0 {
 			effectiveTTL = resolverTTL
 		}
 		c.infow("Adding to cache", "key", key, "expiration", effectiveTTL)
-		c.cache.Add(key, annotated, effectiveTTL)
-		return annotated, nil
+		c.cache.Add(key, resolved, effectiveTTL)
+		return resolved, nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
+	resource := untyped.(resolutionframework.ResolvedResource)
+
 	if shared {
 		c.infow("Resolution deduplicated by singleflight", "resolverType", resolverType, "key", key)
 	}
 
-	return untyped.(resolutionframework.ResolvedResource), nil
+	if wasExecutor {
+		return c.annotate(resource, resolverType, cacheOperationStore), nil
+	}
+	return c.annotate(resource, resolverType, cacheOperationRetrieve), nil
 }
 
 func (c *resolverCache) annotate(resolvedResource resolutionframework.ResolvedResource, resolverType, operation string) *annotatedResource {
