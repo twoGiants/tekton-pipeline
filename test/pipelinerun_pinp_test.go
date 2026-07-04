@@ -147,8 +147,9 @@ func assertPinP(
 		corev1.ConditionTrue,
 		v1.PipelineRunReasonSuccessful.String(),
 	)
-	directParentPrName := actual.OwnerReferences[0].Name
+
 	t.Logf("Checking that labels were propagated correctly for child PipelineRun %q", actual.Name)
+	directParentPrName := actual.OwnerReferences[0].Name
 	if actual.Spec.PipelineRef != nil {
 		// The expected tekton.dev/pipeline label is the resolved child Pipeline
 		// name. For a local name ref it equals the ref name; for a resolver ref

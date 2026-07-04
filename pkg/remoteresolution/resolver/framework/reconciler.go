@@ -243,6 +243,16 @@ func (r *Reconciler) MarkFailed(ctx context.Context, rr *v1beta1.ResolutionReque
 }
 
 func (r *Reconciler) writeResolvedData(ctx context.Context, rr *v1beta1.ResolutionRequest, resource framework.ResolvedResource) error {
+	key := fmt.Sprintf("%s/%s", rr.Namespace, rr.Name)
+	latestRr, err := r.resolutionRequestClientSet.ResolutionV1beta1().ResolutionRequests(rr.Namespace).Get(ctx, rr.Name, metav1.GetOptions{})
+	if err != nil {
+		logging.FromContext(ctx).Warnf("error getting latest generation of resolutionrequest %q: %v", key, err)
+		return err
+	}
+	if latestRr.IsResolved() || latestRr.IsDone() {
+		return nil
+	}
+
 	encodedData := base64.StdEncoding.Strict().EncodeToString(resource.Data())
 	patchBytes, err := json.Marshal(map[string]statusDataPatch{
 		"status": {
@@ -253,17 +263,17 @@ func (r *Reconciler) writeResolvedData(ctx context.Context, rr *v1beta1.Resoluti
 		},
 	})
 	if err != nil {
-		logging.FromContext(ctx).Warnf("writeResolvedData error serializing resource request patch for resolution request %s:%s: %s", rr.Namespace, rr.Name, err.Error())
-		return r.OnError(ctx, rr, &resolutioncommon.UpdatingRequestError{
-			ResolutionRequestKey: fmt.Sprintf("%s/%s", rr.Namespace, rr.Name),
+		logging.FromContext(ctx).Warnf("writeResolvedData error serializing resource request patch for resolution request %s:%s: %s", latestRr.Namespace, latestRr.Name, err.Error())
+		return r.OnError(ctx, latestRr, &resolutioncommon.UpdatingRequestError{
+			ResolutionRequestKey: fmt.Sprintf("%s/%s", latestRr.Namespace, latestRr.Name),
 			Original:             fmt.Errorf("error serializing resource request patch: %w", err),
 		})
 	}
-	_, err = r.resolutionRequestClientSet.ResolutionV1beta1().ResolutionRequests(rr.Namespace).Patch(ctx, rr.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status")
+	_, err = r.resolutionRequestClientSet.ResolutionV1beta1().ResolutionRequests(latestRr.Namespace).Patch(ctx, latestRr.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status")
 	if err != nil {
-		logging.FromContext(ctx).Warnf("writeResolvedData error patching resolution request %s:%s: %s", rr.Namespace, rr.Name, err.Error())
-		return r.OnError(ctx, rr, &resolutioncommon.UpdatingRequestError{
-			ResolutionRequestKey: fmt.Sprintf("%s/%s", rr.Namespace, rr.Name),
+		logging.FromContext(ctx).Warnf("writeResolvedData error patching resolution request %s:%s: %s", latestRr.Namespace, latestRr.Name, err.Error())
+		return r.OnError(ctx, latestRr, &resolutioncommon.UpdatingRequestError{
+			ResolutionRequestKey: fmt.Sprintf("%s/%s", latestRr.Namespace, latestRr.Name),
 			Original:             err,
 		})
 	}

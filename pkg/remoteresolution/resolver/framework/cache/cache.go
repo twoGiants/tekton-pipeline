@@ -100,7 +100,7 @@ func (c *resolverCache) GetCachedOrResolveFromRemote(
 
 		c.infow("Cache hit", "key", key)
 
-		return c.annotate(cached, resolverType, cacheOperationRetrieve), nil
+		return c.annotate(cached, resolverType, CacheOperationRetrieve), nil
 	}
 
 	// If cache miss, resolve from remote using singleflight
@@ -112,12 +112,9 @@ func (c *resolverCache) GetCachedOrResolveFromRemote(
 			return nil, err
 		}
 
-		effectiveTTL := c.ttl
-		if resolverTTL := getResolverTTL(ctx); resolverTTL > 0 {
-			effectiveTTL = resolverTTL
-		}
-		c.infow("Adding to cache", "key", key, "expiration", effectiveTTL)
-		c.cache.Add(key, resolved, effectiveTTL)
+		ttl := c.effectiveTTL(ctx)
+		c.infow("Adding to cache", "key", key, "expiration", ttl)
+		c.cache.Add(key, resolved, ttl)
 		return resolved, nil
 	})
 	if err != nil {
@@ -131,15 +128,35 @@ func (c *resolverCache) GetCachedOrResolveFromRemote(
 	}
 
 	if wasExecutor {
-		return c.annotate(resource, resolverType, cacheOperationStore), nil
+		return c.annotate(resource, resolverType, CacheOperationStore), nil
 	}
-	return c.annotate(resource, resolverType, cacheOperationRetrieve), nil
+	return c.annotate(resource, resolverType, CacheOperationRetrieve), nil
 }
 
 func (c *resolverCache) annotate(resolvedResource resolutionframework.ResolvedResource, resolverType, operation string) *annotatedResource {
 	timestamp := c.clock.Now().Format(time.RFC3339)
 	result := newAnnotatedResource(resolvedResource, resolverType, operation, timestamp)
 	return result
+}
+
+// effectiveTTL reads the TTL(=Time-To-Live) from the resolver-specific ConfigMap, returning global default ttl if unset.
+func (c *resolverCache) effectiveTTL(ctx context.Context) time.Duration {
+	conf := resolutionframework.GetResolverConfigFromContext(ctx)
+	ttlStr, ok := conf[ttlConfigMapKey]
+	if !ok {
+		return c.ttl
+	}
+
+	resolverTTL, err := time.ParseDuration(ttlStr)
+	if err != nil {
+		return c.ttl
+	}
+
+	if resolverTTL > 0 {
+		return resolverTTL
+	}
+
+	return c.ttl
 }
 
 func (c *resolverCache) infow(msg string, keysAndValues ...any) {
@@ -153,17 +170,6 @@ func (c *resolverCache) Clear() {
 	c.infow("Clearing all cache entries")
 	// predicate that returns true clears all entries
 	c.cache.RemoveAll(func(_ any) bool { return true })
-}
-
-// getResolverTTL reads the TTL(=Time-To-Live) from the resolver-specific ConfigMap, returning 0 if unset.
-func getResolverTTL(ctx context.Context) time.Duration {
-	conf := resolutionframework.GetResolverConfigFromContext(ctx)
-	if ttlStr, ok := conf[ttlConfigMapKey]; ok {
-		if parsed, err := time.ParseDuration(ttlStr); err == nil && parsed > 0 {
-			return parsed
-		}
-	}
-	return 0
 }
 
 func generateCacheKey(resolverType string, params []pipelinev1.Param) string {

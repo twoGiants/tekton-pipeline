@@ -31,6 +31,8 @@ import (
 	v1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	resolutionv1beta1 "github.com/tektoncd/pipeline/pkg/apis/resolution/v1beta1"
+	"github.com/tektoncd/pipeline/pkg/remoteresolution/resolver/bundle"
+	"github.com/tektoncd/pipeline/pkg/remoteresolution/resolver/framework/cache"
 
 	"github.com/tektoncd/pipeline/test/parse"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,16 +42,6 @@ import (
 
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
-)
-
-const (
-	cacheAnnotationKey     = "resolution.tekton.dev/cached"
-	cacheTimestampKey      = "resolution.tekton.dev/cache-timestamp"
-	cacheResolverTypeKey   = "resolution.tekton.dev/cache-resolver-type"
-	cacheOperationKey      = "resolution.tekton.dev/cache-operation"
-	cacheValueTrue         = "true"
-	cacheOperationStore    = "store"
-	cacheOperationRetrieve = "retrieve"
 )
 
 var cacheResolverFeatureFlags = requireAllGates(map[string]string{
@@ -62,6 +54,40 @@ var cacheGitFeatureFlags = requireAllGates(map[string]string{
 	"enable-api-fields":   "beta",
 })
 
+// TestResolverCacheAnnotationPropagation test explicitly for resolver cache annotation propagation
+// @test:execution=parallel
+func TestResolverCacheAnnotationPropagation(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	c, namespace := setup(ctx, t, withRegistry, cacheResolverFeatureFlags)
+	knativetest.CleanupOnInterrupt(func() { tearDown(ctx, t, c, namespace) }, t.Logf)
+	defer tearDown(ctx, t, c, namespace)
+
+	// GIVEN
+	task := newHelloWorldTask(t, helpers.ObjectNameForTest(t), namespace)
+	repo := getRegistryServiceIP(ctx, t, c, namespace) + ":5000/test-" + task.Name
+	taskRun1 := newBundleTaskRun(t, namespace, "propagation-1", "always", repo, task.Name)
+	taskRun2 := newBundleTaskRun(t, namespace, "propagation-2", "always", repo, task.Name)
+	setupBundle(ctx, t, c, namespace, repo, task, nil)
+
+	// WHENsequential: first stores, second retrieves from cache
+	if err := createTaskRunAndWait(ctx, c, taskRun1); err != nil {
+		t.Fatal(err)
+	}
+	if err := createTaskRunAndWait(ctx, c, taskRun2); err != nil {
+		t.Fatal(err)
+	}
+
+	// THEN
+	actualTr1 := fetchTaskRunByName(ctx, t, c, taskRun1.Name)
+	actualTr2 := fetchTaskRunByName(ctx, t, c, taskRun2.Name)
+	actualTaskRuns := []*v1.TaskRun{actualTr1, actualTr2}
+	assertCacheAnnotations(t, actualTaskRuns, bundle.LabelValueBundleResolverType,
+		cache.CacheOperationStore, 1)
+	assertCacheAnnotations(t, actualTaskRuns, bundle.LabelValueBundleResolverType,
+		cache.CacheOperationRetrieve, 1)
+}
+
 // @test:execution=parallel
 func TestBundleResolverCache(t *testing.T) {
 	t.Parallel()
@@ -73,7 +99,8 @@ func TestBundleResolverCache(t *testing.T) {
 	// GIVEN
 	replicas := 1
 	taskRunCount := 20
-	expectedRequests := replicas
+	expectedStoreCount := replicas
+	expectedRetrieveCount := taskRunCount - expectedStoreCount
 	task := newHelloWorldTask(t, helpers.ObjectNameForTest(t), namespace)
 	repoName := "test-" + task.Name
 	repo := getRegistryServiceIP(ctx, t, c, namespace) + ":5000/" + repoName
@@ -81,10 +108,16 @@ func TestBundleResolverCache(t *testing.T) {
 	setupBundle(ctx, t, c, namespace, repo, task, nil)
 
 	// WHEN
+	t.Logf("TaskRuns count: %d", taskRunCount)
 	createTaskRunsInParallelAndWait(ctx, t, c, parallelTaskRuns)
 
 	// THEN
-	assertRegistryRequestCount(ctx, t, c, namespace, repoName, expectedRequests, taskRunCount, replicas)
+	actualParallelTrs := fetchTaskRunsByName(ctx, t, c, parallelTaskRuns)
+	assertCacheAnnotations(t, actualParallelTrs, bundle.LabelValueBundleResolverType,
+		cache.CacheOperationStore, expectedStoreCount)
+	assertCacheAnnotations(t, actualParallelTrs, bundle.LabelValueBundleResolverType,
+		cache.CacheOperationRetrieve, expectedRetrieveCount)
+	assertRegistryRequests(ctx, t, c, namespace, repoName, expectedStoreCount, taskRunCount, replicas)
 }
 
 // @test:execution=serial
@@ -98,9 +131,9 @@ func TestBundleResolverCacheWithFourResolverReplicas(t *testing.T) {
 
 	// GIVEN
 	replicas := 4
-	taskRunCount := 80
-	// Only the replica that owns the ResolutionRequest bucket should populate its cache.
-	expectedRequests := 1
+	taskRunCount := 20
+	expectedStoreCount := replicas
+	expectedRetrieveCount := taskRunCount - expectedStoreCount
 	task := newHelloWorldTask(t, helpers.ObjectNameForTest(t), namespace)
 	repoName := "test-" + task.Name
 	repo := getRegistryServiceIP(ctx, t, c, namespace) + ":5000/" + repoName
@@ -111,306 +144,16 @@ func TestBundleResolverCacheWithFourResolverReplicas(t *testing.T) {
 	t.Logf("Scaled resolver deployment to %d replicas", replicas)
 
 	// WHEN
+	t.Logf("TaskRuns count: %d", taskRunCount)
 	createTaskRunsInParallelAndWait(ctx, t, c, parallelTaskRuns)
 
 	// THEN
-	assertRegistryRequestCount(ctx, t, c, namespace, repoName, expectedRequests, taskRunCount, replicas)
-}
-
-func newHelloWorldTask(t *testing.T, taskName string, namespace string) *v1beta1.Task {
-	t.Helper()
-
-	result := parse.MustParseV1beta1Task(t, fmt.Sprintf(`
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  steps:
-  - name: hello
-    image: mirror.gcr.io/alpine
-    script: 'echo "Hello World!"'
-`, taskName, namespace))
-	return result
-}
-
-func newBundleTaskRun(t *testing.T, namespace, taskRunName, cacheMode, repo, taskName string) *v1.TaskRun {
-	t.Helper()
-	return parse.MustParseV1TaskRun(t, fmt.Sprintf(`
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  taskRef:
-    resolver: bundles
-    params:
-    - name: bundle
-      value: %s
-    - name: name
-      value: %s
-    - name: kind
-      value: task
-    - name: cache
-      value: %s
-`, taskRunName, namespace, repo, taskName, cacheMode))
-}
-
-func createTaskRunAndWait(ctx context.Context, c *clients, tr *v1.TaskRun) error {
-	if _, err := c.V1TaskRunClient.Create(ctx, tr, metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("failed to create TaskRun: %w", err)
-	}
-
-	return WaitForTaskRunState(ctx, c, tr.Name, TaskRunSucceed(tr.Name), "TaskRunSuccess", v1Version)
-}
-
-func newBundleTaskRuns(t *testing.T, namespace string, repo string, taskName string, count int, prefix string) []*v1.TaskRun {
-	t.Helper()
-
-	result := make([]*v1.TaskRun, count)
-	for i := 0; i < len(result); i++ {
-		result[i] = newBundleTaskRun(t, namespace, fmt.Sprintf("%s-%d", prefix, i), "always", repo, taskName)
-	}
-	return result
-}
-
-func scaleResolverDeployment(ctx context.Context, t *testing.T, c *clients, replicas int32) {
-	t.Helper()
-
-	resolverNS := resolverconfig.ResolversNamespace(system.Namespace())
-	deploymentName := "tekton-pipelines-remote-resolvers"
-
-	scale, err := c.KubeClient.AppsV1().Deployments(resolverNS).GetScale(ctx, deploymentName, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Failed to get scale for deployment %s: %v", deploymentName, err)
-	}
-
-	scale.Spec.Replicas = replicas
-	if _, err := c.KubeClient.AppsV1().Deployments(resolverNS).UpdateScale(ctx, deploymentName, scale, metav1.UpdateOptions{}); err != nil {
-		t.Fatalf("Failed to scale deployment %s to %d replicas: %v", deploymentName, replicas, err)
-	}
-
-	if err := knativetest.WaitForDeploymentScale(ctx, c.KubeClient, deploymentName, resolverNS, int(replicas)); err != nil {
-		t.Fatalf("Error waiting for deployment %s to reach %d ready replicas: %v", deploymentName, replicas, err)
-	}
-}
-
-func createTaskRunsInParallelAndWait(ctx context.Context, t *testing.T, c *clients, taskRuns []*v1.TaskRun) {
-	t.Helper()
-
-	var wg sync.WaitGroup
-	startSignal := make(chan struct{})
-	errChan := make(chan error, len(taskRuns))
-	for _, tr := range taskRuns {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			<-startSignal
-			if err := createTaskRunAndWait(ctx, c, tr); err != nil {
-				errChan <- err
-			}
-		}()
-	}
-	close(startSignal)
-	wg.Wait()
-	close(errChan)
-
-	var allTaskRunErrs []error
-	for taskRunErr := range errChan {
-		allTaskRunErrs = append(allTaskRunErrs, taskRunErr)
-	}
-	if joinedErrs := errors.Join(allTaskRunErrs...); joinedErrs != nil {
-		t.Fatal(joinedErrs)
-	}
-}
-
-func assertRegistryRequestCount(ctx context.Context, t *testing.T, c *clients, namespace string, repoName string, expectedRequests int, taskRunCount int, replicas int) {
-	t.Helper()
-
-	actualRequestsFromLogs := countManifestGetRequestsInRegistryLogs(ctx, t, c, namespace, repoName)
-	if expectedRequests != actualRequestsFromLogs {
-		// Log-based counting is informational only — registry log format
-		// varies across versions and can produce duplicates (e.g.,
-		// Distribution v3.1.0 logs both access-log and handler-level entries
-		// per request). Use metrics as the authoritative source.
-		t.Logf(
-			"Note: log-based count (%d) differs from expected (%d) — this is informational, see metrics below",
-			actualRequestsFromLogs, expectedRequests,
-		)
-	}
-
-	actualRequestsFromMetrics, err := manifestGetRequestCountFromRegistryMetrics(ctx, t, c, namespace)
-	if err != nil {
-		t.Errorf("Error occurred during metrics gathering: %v", err)
-	}
-
-	if expectedRequests != actualRequestsFromMetrics {
-		t.Errorf(
-			"Caching not working as expected. Expected %d requests from registry metrics, got %d",
-			expectedRequests, actualRequestsFromMetrics,
-		)
-	}
-
-	t.Logf("%s summary: taskRuns=%d, resolverReplicas=%d\n"+
-		"  Registry GETs from logs:    expected=%d, actual=%d\n"+
-		"  Registry GETs from metrics: expected=%d, actual=%d",
-		t.Name(),
-		taskRunCount, replicas,
-		expectedRequests, actualRequestsFromLogs,
-		expectedRequests, actualRequestsFromMetrics)
-}
-
-func manifestGetRequestCountFromRegistryMetrics(ctx context.Context, t *testing.T, c *clients, namespace string) (int, error) {
-	t.Helper()
-
-	podName := getRegistryPodName(ctx, t, c, namespace)
-
-	result := c.KubeClient.
-		CoreV1().
-		RESTClient().
-		Get().
-		Resource("pods").
-		Name(podName + ":5001").
-		Namespace(namespace).
-		SubResource("proxy").
-		Suffix("metrics").
-		Do(ctx)
-
-	body, err := result.Raw()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get metrics from pod: %w", err)
-	}
-
-	parser := expfmt.NewTextParser(model.LegacyValidation)
-	metricFamilies, err := parser.TextToMetricFamilies(strings.NewReader(string(body)))
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse metrics: %w", err)
-	}
-
-	totalHttpRequestMetricFamily, ok := metricFamilies["registry_http_requests_total"]
-	if !ok {
-		return 0, errors.New("metric registry_http_requests_total not found")
-	}
-
-	for _, oneHttpRequestMetric := range totalHttpRequestMetricFamily.GetMetric() {
-		hasGetManifest := false
-		hasGet := false
-
-		for _, label := range oneHttpRequestMetric.GetLabel() {
-			if label.GetName() == "handler" && label.GetValue() == "manifest" {
-				hasGetManifest = true
-			}
-			if label.GetName() == "method" && label.GetValue() == "get" {
-				hasGet = true
-			}
-		}
-
-		if hasGetManifest && hasGet {
-			return int(oneHttpRequestMetric.GetCounter().GetValue()), nil
-		}
-	}
-
-	return 0, errors.New("metric with handler=manifest and method=get not found")
-}
-
-func countManifestGetRequestsInRegistryLogs(ctx context.Context, t *testing.T, c *clients, namespace, repoName string) int {
-	t.Helper()
-
-	podName := getRegistryPodName(ctx, t, c, namespace)
-
-	rawLogs, err := getContainerLogsFromPod(ctx, c.KubeClient, podName, "registry", namespace)
-	if err != nil {
-		t.Logf("Warning: failed to get registry logs: %v", err)
-		return 0
-	}
-
-	pattern := fmt.Sprintf("GET /v2/%s/manifests/", repoName)
-	return strings.Count(rawLogs, pattern)
-}
-
-func hasCacheAnnotation(annotations map[string]string) bool {
-	if annotations == nil {
-		return false
-	}
-	cached, exists := annotations[cacheAnnotationKey]
-	return exists && cached == cacheValueTrue
-}
-
-func newGitCloneBundleTaskRun(t *testing.T, namespace, name, cacheMode string) *v1.TaskRun {
-	t.Helper()
-	return parse.MustParseV1TaskRun(t, fmt.Sprintf(`
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  params:
-  - name: url
-    value: "https://github.com/tektoncd/pipeline.git"
-  workspaces:
-  - name: output
-    emptyDir: {}
-  taskRef:
-    resolver: bundles
-    params:
-    - name: bundle
-      value: ghcr.io/tektoncd/catalog/upstream/tasks/git-clone@sha256:65e61544c5870c8828233406689d812391735fd4100cb444bbd81531cb958bb3
-    - name: name
-      value: git-clone
-    - name: kind
-      value: task
-    - name: cache
-      value: %s
-`, name, namespace, cacheMode))
-}
-
-func createGitTaskRunWithCache(t *testing.T, namespace, name, revision, cacheMode string) *v1.TaskRun {
-	t.Helper()
-	return parse.MustParseV1TaskRun(t, fmt.Sprintf(`
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  workspaces:
-    - name: output
-      emptyDir: {}
-  taskRef:
-    resolver: git
-    params:
-    - name: url
-      value: https://github.com/tektoncd/catalog.git
-    - name: pathInRepo
-      value: /task/git-clone/0.10/git-clone.yaml
-    - name: revision
-      value: %s
-    - name: cache
-      value: %s
-  params:
-    - name: url
-      value: https://github.com/tektoncd/pipeline
-    - name: deleteExisting
-      value: "true"
-`, name, namespace, revision, cacheMode))
-}
-
-func createClusterTaskRun(t *testing.T, namespace, name, taskName, cacheMode string) *v1.TaskRun {
-	t.Helper()
-	return parse.MustParseV1TaskRun(t, fmt.Sprintf(`
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  taskRef:
-    resolver: cluster
-    params:
-    - name: kind
-      value: task
-    - name: name
-      value: %s
-    - name: namespace
-      value: %s
-    - name: cache
-      value: %s
-`, name, namespace, taskName, namespace, cacheMode))
+	actualParallelTrs := fetchTaskRunsByName(ctx, t, c, parallelTaskRuns)
+	assertCacheAnnotations(t, actualParallelTrs, bundle.LabelValueBundleResolverType,
+		cache.CacheOperationStore, expectedStoreCount)
+	assertCacheAnnotations(t, actualParallelTrs, bundle.LabelValueBundleResolverType,
+		cache.CacheOperationRetrieve, expectedRetrieveCount)
+	assertRegistryRequests(ctx, t, c, namespace, repoName, expectedStoreCount, taskRunCount, replicas)
 }
 
 // TestCacheIsolationBetweenResolvers validates that cache keys are unique between resolvers
@@ -453,13 +196,13 @@ spec:
 	}
 
 	// Test git resolver cache
-	tr2 := createGitTaskRunWithCache(t, namespace, "isolation-git-1", "dd7cc22f2965ff4c9d8855b7161c2ffe94b6153e", "always")
+	tr2 := newGitTaskRunWithCache(t, namespace, "isolation-git-1", "dd7cc22f2965ff4c9d8855b7161c2ffe94b6153e", "always")
 	if err := createTaskRunAndWait(ctx, c, tr2); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Test cluster resolver cache
-	tr3 := createClusterTaskRun(t, namespace, "isolation-cluster-1", taskName, "always")
+	tr3 := newClusterTaskRun(t, namespace, "isolation-cluster-1", taskName, "always")
 	if err := createTaskRunAndWait(ctx, c, tr3); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -476,7 +219,7 @@ spec:
 
 	for _, req := range resolutionRequests.Items {
 		if req.Namespace == namespace && req.Status.Data != "" && req.Status.Annotations != nil {
-			switch req.Status.Annotations[cacheResolverTypeKey] {
+			switch req.Status.Annotations[cache.CacheResolverTypeKey] {
 			case "bundles":
 				bundleCacheFound = true
 			case "git":
@@ -572,9 +315,9 @@ spec:
 				if tc.cacheMode == "auto" && tc.shouldCache == false {
 					revision = "main" // Use branch name for auto mode that shouldn't cache
 				}
-				tr = createGitTaskRunWithCache(t, namespace, "config-test-"+tc.name, revision, tc.cacheMode)
+				tr = newGitTaskRunWithCache(t, namespace, "config-test-"+tc.name, revision, tc.cacheMode)
 			case "cluster":
-				tr = createClusterTaskRun(t, namespace, "config-test-"+tc.name, taskName, tc.cacheMode)
+				tr = newClusterTaskRun(t, namespace, "config-test-"+tc.name, taskName, tc.cacheMode)
 			}
 
 			_, err := c.V1TaskRunClient.Create(ctx, tr, metav1.CreateOptions{})
@@ -710,6 +453,356 @@ spec:
 	t.Logf("Cache invalid parameters test completed successfully")
 }
 
+// START: Resolver Cache Testing Framework
+// ---------------------------------------
+func newHelloWorldTask(t *testing.T, taskName string, namespace string) *v1beta1.Task {
+	t.Helper()
+
+	result := parse.MustParseV1beta1Task(t, fmt.Sprintf(`
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  steps:
+  - name: hello
+    image: mirror.gcr.io/alpine
+    script: 'echo "Hello World!"'
+`, taskName, namespace))
+	return result
+}
+
+func newBundleTaskRuns(t *testing.T, namespace string, repo string, taskName string, count int, prefix string) []*v1.TaskRun {
+	t.Helper()
+
+	result := make([]*v1.TaskRun, count)
+	for i := 0; i < len(result); i++ {
+		result[i] = newBundleTaskRun(t, namespace, fmt.Sprintf("%s-%d", prefix, i), "always", repo, taskName)
+	}
+	return result
+}
+
+func newBundleTaskRun(t *testing.T, namespace, taskRunName, cacheMode, repo, taskName string) *v1.TaskRun {
+	t.Helper()
+	return parse.MustParseV1TaskRun(t, fmt.Sprintf(`
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  taskRef:
+    resolver: bundles
+    params:
+    - name: bundle
+      value: %s
+    - name: name
+      value: %s
+    - name: kind
+      value: task
+    - name: cache
+      value: %s
+`, taskRunName, namespace, repo, taskName, cacheMode))
+}
+
+func newGitCloneBundleTaskRun(t *testing.T, namespace, name, cacheMode string) *v1.TaskRun {
+	t.Helper()
+	return parse.MustParseV1TaskRun(t, fmt.Sprintf(`
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  params:
+  - name: url
+    value: "https://github.com/tektoncd/pipeline.git"
+  workspaces:
+  - name: output
+    emptyDir: {}
+  taskRef:
+    resolver: bundles
+    params:
+    - name: bundle
+      value: ghcr.io/tektoncd/catalog/upstream/tasks/git-clone@sha256:65e61544c5870c8828233406689d812391735fd4100cb444bbd81531cb958bb3
+    - name: name
+      value: git-clone
+    - name: kind
+      value: task
+    - name: cache
+      value: %s
+`, name, namespace, cacheMode))
+}
+
+func newGitTaskRunWithCache(t *testing.T, namespace, name, revision, cacheMode string) *v1.TaskRun {
+	t.Helper()
+	return parse.MustParseV1TaskRun(t, fmt.Sprintf(`
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  workspaces:
+    - name: output
+      emptyDir: {}
+  taskRef:
+    resolver: git
+    params:
+    - name: url
+      value: https://github.com/tektoncd/catalog.git
+    - name: pathInRepo
+      value: /task/git-clone/0.10/git-clone.yaml
+    - name: revision
+      value: %s
+    - name: cache
+      value: %s
+  params:
+    - name: url
+      value: https://github.com/tektoncd/pipeline
+    - name: deleteExisting
+      value: "true"
+`, name, namespace, revision, cacheMode))
+}
+
+func newClusterTaskRun(t *testing.T, namespace, name, taskName, cacheMode string) *v1.TaskRun {
+	t.Helper()
+	return parse.MustParseV1TaskRun(t, fmt.Sprintf(`
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  taskRef:
+    resolver: cluster
+    params:
+    - name: kind
+      value: task
+    - name: name
+      value: %s
+    - name: namespace
+      value: %s
+    - name: cache
+      value: %s
+`, name, namespace, taskName, namespace, cacheMode))
+}
+
+func createTaskRunAndWait(ctx context.Context, c *clients, tr *v1.TaskRun) error {
+	if _, err := c.V1TaskRunClient.Create(ctx, tr, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("failed to create TaskRun: %w", err)
+	}
+
+	return WaitForTaskRunState(ctx, c, tr.Name, TaskRunSucceed(tr.Name), "TaskRunSuccess", v1Version)
+}
+
+func scaleResolverDeployment(ctx context.Context, t *testing.T, c *clients, replicas int32) {
+	t.Helper()
+
+	resolverNS := resolverconfig.ResolversNamespace(system.Namespace())
+	deploymentName := "tekton-pipelines-remote-resolvers"
+
+	scale, err := c.KubeClient.AppsV1().Deployments(resolverNS).GetScale(ctx, deploymentName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get scale for deployment %s: %v", deploymentName, err)
+	}
+
+	scale.Spec.Replicas = replicas
+	if _, err := c.KubeClient.AppsV1().Deployments(resolverNS).UpdateScale(ctx, deploymentName, scale, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("Failed to scale deployment %s to %d replicas: %v", deploymentName, replicas, err)
+	}
+
+	if err := knativetest.WaitForDeploymentScale(ctx, c.KubeClient, deploymentName, resolverNS, int(replicas)); err != nil {
+		t.Fatalf("Error waiting for deployment %s to reach %d ready replicas: %v", deploymentName, replicas, err)
+	}
+}
+
+func createTaskRunsInParallelAndWait(ctx context.Context, t *testing.T, c *clients, taskRuns []*v1.TaskRun) {
+	t.Helper()
+
+	var wg sync.WaitGroup
+	startSignal := make(chan struct{})
+	errChan := make(chan error, len(taskRuns))
+	for _, tr := range taskRuns {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			<-startSignal
+			if err := createTaskRunAndWait(ctx, c, tr); err != nil {
+				errChan <- err
+			}
+		}()
+	}
+	close(startSignal)
+	wg.Wait()
+	close(errChan)
+
+	var allTaskRunErrs []error
+	for taskRunErr := range errChan {
+		allTaskRunErrs = append(allTaskRunErrs, taskRunErr)
+	}
+	if joinedErrs := errors.Join(allTaskRunErrs...); joinedErrs != nil {
+		t.Fatal(joinedErrs)
+	}
+}
+
+func fetchTaskRunsByName(ctx context.Context, t *testing.T, c *clients, taskRuns []*v1.TaskRun) []*v1.TaskRun {
+	t.Helper()
+	var result []*v1.TaskRun
+	for _, parallelTaskRun := range taskRuns {
+		actual := fetchTaskRunByName(ctx, t, c, parallelTaskRun.Name)
+		result = append(result, actual)
+	}
+	return result
+}
+
+func fetchTaskRunByName(ctx context.Context, t *testing.T, c *clients, taskRunName string) *v1.TaskRun {
+	t.Helper()
+	result, err := c.V1TaskRunClient.Get(ctx, taskRunName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Could not fetch actual TaskRun %s: %s", taskRunName, err)
+	}
+	return result
+}
+
+func assertCacheAnnotations(
+	t *testing.T,
+	actualTaskRuns []*v1.TaskRun,
+	expectedResolver string,
+	expectedCacheOperation string,
+	expectedCount int,
+) {
+	t.Helper()
+
+	actualCount := 0
+	for _, tr := range actualTaskRuns {
+		actualAnnotations := tr.GetAnnotations()
+		if actualAnnotations[cache.CacheOperationKey] == expectedCacheOperation {
+			actualCount++
+		}
+
+		if actualAnnotations[cache.CacheAnnotationKey] != cache.CacheValueTrue {
+			t.Errorf(`Expected "%s" annotation to be: %s, got: %s. TaskRun name: %s`,
+				cache.CacheAnnotationKey, cache.CacheValueTrue, actualAnnotations[cache.CacheAnnotationKey], tr.GetName())
+		}
+
+		if _, exist := actualAnnotations[cache.CacheTimestampKey]; !exist {
+			t.Errorf(`Expected "%s" annotation to exist.TaskRun name: %s`,
+				cache.CacheTimestampKey, tr.GetName())
+		}
+
+		if actualAnnotations[cache.CacheResolverTypeKey] != expectedResolver {
+			t.Errorf(`Expected "%s" annotation to be: %s, got: %s. TaskRun name: %s`,
+				cache.CacheResolverTypeKey, expectedResolver, actualAnnotations[cache.CacheResolverTypeKey], tr.GetName())
+		}
+	}
+
+	if expectedCount != actualCount {
+		t.Errorf(`Expected cache "%s" operations: %d, got: %d`,
+			expectedCacheOperation, expectedCount, actualCount)
+		return
+	}
+
+	t.Logf(`Cache "%s" operations: expected=%d, actual=%d`,
+		expectedCacheOperation, expectedCount, actualCount)
+}
+
+func assertRegistryRequests(ctx context.Context, t *testing.T, c *clients, namespace string, repoName string, expectedRequests int, taskRunCount int, replicas int) {
+	t.Helper()
+
+	actualRequestsFromMetrics, err := manifestGetRequestCountFromRegistryMetrics(ctx, t, c, namespace)
+	if err != nil {
+		t.Errorf("Error occurred during metrics gathering: %v", err)
+	}
+
+	if expectedRequests != actualRequestsFromMetrics {
+		t.Errorf(
+			"Caching not working as expected. Expected %d requests from registry metrics, got %d",
+			expectedRequests, actualRequestsFromMetrics,
+		)
+	}
+
+	actualRequestsFromLogs := countManifestGetRequestsInRegistryLogs(ctx, t, c, namespace, repoName)
+
+	t.Logf("%s summary:\n"+
+		"- TaskRuns=%d, resolver replicas=%d\n"+
+		"- Registry GETs from metrics: expected=%d, actual=%d\n"+
+		"- Registry GETs from logs:    %d (informational only)",
+		t.Name(),
+		taskRunCount, replicas,
+		expectedRequests, actualRequestsFromMetrics,
+		actualRequestsFromLogs)
+}
+
+func manifestGetRequestCountFromRegistryMetrics(ctx context.Context, t *testing.T, c *clients, namespace string) (int, error) {
+	t.Helper()
+
+	podName := getRegistryPodName(ctx, t, c, namespace)
+
+	result := c.KubeClient.
+		CoreV1().
+		RESTClient().
+		Get().
+		Resource("pods").
+		Name(podName + ":5001").
+		Namespace(namespace).
+		SubResource("proxy").
+		Suffix("metrics").
+		Do(ctx)
+
+	body, err := result.Raw()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get metrics from pod: %w", err)
+	}
+
+	parser := expfmt.NewTextParser(model.LegacyValidation)
+	metricFamilies, err := parser.TextToMetricFamilies(strings.NewReader(string(body)))
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse metrics: %w", err)
+	}
+
+	totalHttpRequestMetricFamily, ok := metricFamilies["registry_http_requests_total"]
+	if !ok {
+		return 0, errors.New("metric registry_http_requests_total not found")
+	}
+
+	for _, oneHttpRequestMetric := range totalHttpRequestMetricFamily.GetMetric() {
+		hasGetManifest := false
+		hasGet := false
+
+		for _, label := range oneHttpRequestMetric.GetLabel() {
+			if label.GetName() == "handler" && label.GetValue() == "manifest" {
+				hasGetManifest = true
+			}
+			if label.GetName() == "method" && label.GetValue() == "get" {
+				hasGet = true
+			}
+		}
+
+		if hasGetManifest && hasGet {
+			return int(oneHttpRequestMetric.GetCounter().GetValue()), nil
+		}
+	}
+
+	return 0, errors.New("metric with handler=manifest and method=get not found")
+}
+
+func countManifestGetRequestsInRegistryLogs(ctx context.Context, t *testing.T, c *clients, namespace, repoName string) int {
+	t.Helper()
+
+	podName := getRegistryPodName(ctx, t, c, namespace)
+
+	rawLogs, err := getContainerLogsFromPod(ctx, c.KubeClient, podName, "registry", namespace)
+	if err != nil {
+		t.Logf("Warning: failed to get registry logs: %v", err)
+		return 0
+	}
+
+	pattern := fmt.Sprintf("GET /v2/%s/manifests/", repoName)
+	return strings.Count(rawLogs, pattern)
+}
+
+func hasCacheAnnotation(annotations map[string]string) bool {
+	if annotations == nil {
+		return false
+	}
+	cached, exists := annotations[cache.CacheAnnotationKey]
+	return exists && cached == cache.CacheValueTrue
+}
+
 // getResolutionRequest gets the ResolutionRequest for a TaskRun
 func getResolutionRequest(ctx context.Context, t *testing.T, c *clients, namespace, taskRunName string) *resolutionv1beta1.ResolutionRequest {
 	t.Helper()
@@ -740,3 +833,6 @@ func getResolutionRequest(ctx context.Context, t *testing.T, c *clients, namespa
 
 	return mostRecent
 }
+
+// -------------------------------------
+// END: Resolver Cache Testing Framework

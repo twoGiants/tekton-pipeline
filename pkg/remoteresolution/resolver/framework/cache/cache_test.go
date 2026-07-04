@@ -163,8 +163,8 @@ func TestCacheTTLExpiration(t *testing.T) {
 		t.Fatalf("unexpected error %v", err)
 	}
 
-	if resource.Annotations()[cacheOperationKey] != cacheOperationStore {
-		t.Fatalf("expected cache miss and cache operation 'store', got %s", resource.Annotations()[cacheOperationKey])
+	if resource.Annotations()[CacheOperationKey] != CacheOperationStore {
+		t.Fatalf("expected cache miss and cache operation 'store', got %s", resource.Annotations()[CacheOperationKey])
 	}
 
 	// WHEN
@@ -178,8 +178,8 @@ func TestCacheTTLExpiration(t *testing.T) {
 
 	// cacheOperationStore proves this is a fresh resolution, not a cache hit
 	// (a cache hit would produce cacheOperationRetrieve instead)
-	if resource.Annotations()[cacheOperationKey] != cacheOperationStore {
-		t.Fatalf("expected cache miss and cache operation 'store', got %s", resource.Annotations()[cacheOperationKey])
+	if resource.Annotations()[CacheOperationKey] != CacheOperationStore {
+		t.Fatalf("expected cache miss and cache operation 'store', got %s", resource.Annotations()[CacheOperationKey])
 	}
 }
 
@@ -214,7 +214,7 @@ func TestCacheSpecificTTLOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resource.Annotations()[cacheOperationKey] != cacheOperationStore {
+	if resource.Annotations()[CacheOperationKey] != CacheOperationStore {
 		t.Fatal("Expected cache miss after per-resolver TTL expiration — entry should have expired at 2m, not the global 10m")
 	}
 }
@@ -345,18 +345,18 @@ func TestGetCachedOrResolveFromRemote(t *testing.T) {
 			t.Fatalf("unexpected error: %v", cachePopulationErr)
 		}
 
-		actualCachePopulationOperation := cachePopulationResult.Annotations()[cacheOperationKey]
-		if actualCachePopulationOperation != cacheOperationStore {
-			t.Fatalf("expected %s, got %s", cacheOperationStore, actualCachePopulationOperation)
+		actualCachePopulationOperation := cachePopulationResult.Annotations()[CacheOperationKey]
+		if actualCachePopulationOperation != CacheOperationStore {
+			t.Fatalf("expected %s, got %s", CacheOperationStore, actualCachePopulationOperation)
 		}
 
 		if cacheHitErr != nil {
 			t.Fatalf("unexpected error: %v", cacheHitErr)
 		}
 
-		actualCacheHitOperation := cacheHitResult.Annotations()[cacheOperationKey]
-		if actualCacheHitOperation != cacheOperationRetrieve {
-			t.Fatalf("expected %s, got %s", cacheOperationRetrieve, actualCacheHitOperation)
+		actualCacheHitOperation := cacheHitResult.Annotations()[CacheOperationKey]
+		if actualCacheHitOperation != CacheOperationRetrieve {
+			t.Fatalf("expected %s, got %s", CacheOperationRetrieve, actualCacheHitOperation)
 		}
 	})
 
@@ -407,9 +407,9 @@ func TestGetCachedOrResolveFromRemote(t *testing.T) {
 			t.Fatal("expected resolved resource on retry, got nil")
 		}
 
-		actualRetryOperation := retryResult.Annotations()[cacheOperationKey]
-		if actualRetryOperation != cacheOperationStore {
-			t.Fatalf("expected cache operation %s on retry, got %s", cacheOperationStore, actualRetryOperation)
+		actualRetryOperation := retryResult.Annotations()[CacheOperationKey]
+		if actualRetryOperation != CacheOperationStore {
+			t.Fatalf("expected cache operation %s on retry, got %s", CacheOperationStore, actualRetryOperation)
 		}
 	})
 

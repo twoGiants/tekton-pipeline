@@ -53,7 +53,7 @@ func TestNewAnnotatedResource(t *testing.T) {
 	resolverType := "bundles"
 
 	// WHEN
-	annotated := newAnnotatedResource(mockResource, resolverType, cacheOperationStore, expectedTimestamp)
+	annotated := newAnnotatedResource(mockResource, resolverType, CacheOperationStore, expectedTimestamp)
 
 	// THEN
 	if string(annotated.Data()) != "test data" {
@@ -61,24 +61,24 @@ func TestNewAnnotatedResource(t *testing.T) {
 	}
 
 	annotations := annotated.Annotations()
-	if annotations[cacheAnnotationKey] != "true" {
-		t.Errorf("Expected cache annotation to be 'true', got '%s'", annotations[cacheAnnotationKey])
+	if annotations[CacheAnnotationKey] != "true" {
+		t.Errorf("Expected cache annotation to be 'true', got '%s'", annotations[CacheAnnotationKey])
 	}
 
-	if annotations[cacheResolverTypeKey] != resolverType {
-		t.Errorf("Expected resolver type '%s', got '%s'", resolverType, annotations[cacheResolverTypeKey])
+	if annotations[CacheResolverTypeKey] != resolverType {
+		t.Errorf("Expected resolver type '%s', got '%s'", resolverType, annotations[CacheResolverTypeKey])
 	}
 
-	if annotations[cacheTimestampKey] != expectedTimestamp {
-		t.Errorf("Expected cache timestamp to be %s, got %s", expectedTimestamp, annotations[cacheTimestampKey])
+	if annotations[CacheTimestampKey] != expectedTimestamp {
+		t.Errorf("Expected cache timestamp to be %s, got %s", expectedTimestamp, annotations[CacheTimestampKey])
 	}
 
-	if _, err := time.Parse(time.RFC3339, annotations[cacheTimestampKey]); err != nil {
+	if _, err := time.Parse(time.RFC3339, annotations[CacheTimestampKey]); err != nil {
 		t.Errorf("Expected valid RFC3339 timestamp, got error: %v", err)
 	}
 
-	if annotations[cacheOperationKey] != cacheOperationStore {
-		t.Errorf("Expected cache operation '%s', got '%s'", cacheOperationStore, annotations[cacheOperationKey])
+	if annotations[CacheOperationKey] != CacheOperationStore {
+		t.Errorf("Expected cache operation '%s', got '%s'", CacheOperationStore, annotations[CacheOperationKey])
 	}
 
 	if annotations["existing-key"] != "existing-value" {
