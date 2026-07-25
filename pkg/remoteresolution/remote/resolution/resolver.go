@@ -15,18 +15,23 @@ package resolution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	v1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/apis/resolution/v1beta1"
 	"github.com/tektoncd/pipeline/pkg/client/clientset/versioned/scheme"
 	"github.com/tektoncd/pipeline/pkg/remote"
-	resolution "github.com/tektoncd/pipeline/pkg/remote/resolution"
 	remoteresource "github.com/tektoncd/pipeline/pkg/remoteresolution/resource"
 	resource "github.com/tektoncd/pipeline/pkg/resolution/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"knative.dev/pkg/kmap"
 	"knative.dev/pkg/kmeta"
+
+	tknreconciler "github.com/tektoncd/pipeline/pkg/reconciler"
+	resolutioncommon "github.com/tektoncd/pipeline/pkg/resolution/common"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var _ remote.Resolver = (*Resolver)(nil)
@@ -64,7 +69,7 @@ func (resolver *Resolver) Get(ctx context.Context, _, _ string) (runtime.Object,
 	decoder := serializer.
 		NewCodecFactory(scheme.Scheme, serializer.EnableStrict).
 		UniversalDeserializer()
-	return resolution.ResolvedRequest(resolved, decoder, err)
+	return ResolvedRequest(resolved, decoder, err)
 }
 
 // List implements remote.Resolver but is unused for remote resolution.
@@ -100,4 +105,43 @@ func buildRequest(resolverName string, owner kmeta.OwnerRefable, resolverPayload
 		owner:   owner,
 	}
 	return req, nil
+}
+
+// ResolvedRequest decodes a resolved resource into a runtime.Object and propagates resolver annotations to it.
+func ResolvedRequest(resolved resolutioncommon.ResolvedResource, decoder runtime.Decoder, err error) (runtime.Object, *v1.RefSource, error) {
+	if errors.Is(err, resolutioncommon.ErrRequestInProgress) {
+		return nil, nil, remote.ErrRequestInProgress
+	}
+
+	if err != nil {
+		return nil, nil, fmt.Errorf("error requesting remote resource: %w", err)
+	}
+
+	if resolved == nil {
+		return nil, nil, ErrNilResource
+	}
+
+	data, err := resolved.Data()
+	if err != nil {
+		return nil, nil, &DataAccessError{Original: err}
+	}
+
+	obj, _, err := decoder.Decode(data, nil, nil)
+	if err != nil {
+		return nil, nil, &InvalidRuntimeObjectError{Original: err}
+	}
+
+	if len(resolved.Annotations()) == 0 {
+		return obj, resolved.RefSource(), nil
+	}
+
+	metaObj, ok := obj.(metav1.Object)
+	if !ok {
+		return nil, nil, &UnsupportedObjectTypeError{ObjectType: fmt.Sprintf("%T", obj)}
+	}
+
+	mergedAnnotations := kmap.Union(kmap.ExcludeKeys(resolved.Annotations(), tknreconciler.KubectlLastAppliedAnnotationKey), metaObj.GetAnnotations())
+	metaObj.SetAnnotations(mergedAnnotations)
+
+	return obj, resolved.RefSource(), nil
 }

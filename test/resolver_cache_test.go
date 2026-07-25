@@ -139,7 +139,7 @@ func TestBundleResolverCacheWithFourResolverReplicas(t *testing.T) {
 	repo := getRegistryServiceIP(ctx, t, c, namespace) + ":5000/" + repoName
 	parallelTaskRuns := newBundleTaskRuns(t, namespace, repo, task.Name, taskRunCount, "parallel")
 	setupBundle(ctx, t, c, namespace, repo, task, nil)
-	scaleResolverDeployment(ctx, t, c, int32(replicas))
+	scaleResolverDeployment(ctx, t, c, replicas)
 	defer scaleResolverDeployment(ctx, t, c, 1)
 	t.Logf("Scaled resolver deployment to %d replicas", replicas)
 
@@ -587,7 +587,7 @@ func createTaskRunAndWait(ctx context.Context, c *clients, tr *v1.TaskRun) error
 	return WaitForTaskRunState(ctx, c, tr.Name, TaskRunSucceed(tr.Name), "TaskRunSuccess", v1Version)
 }
 
-func scaleResolverDeployment(ctx context.Context, t *testing.T, c *clients, replicas int32) {
+func scaleResolverDeployment(ctx context.Context, t *testing.T, c *clients, replicas int) {
 	t.Helper()
 
 	resolverNS := resolverconfig.ResolversNamespace(system.Namespace())
@@ -598,7 +598,7 @@ func scaleResolverDeployment(ctx context.Context, t *testing.T, c *clients, repl
 		t.Fatalf("Failed to get scale for deployment %s: %v", deploymentName, err)
 	}
 
-	scale.Spec.Replicas = replicas
+	scale.Spec.Replicas = int32(replicas)
 	if _, err := c.KubeClient.AppsV1().Deployments(resolverNS).UpdateScale(ctx, deploymentName, scale, metav1.UpdateOptions{}); err != nil {
 		t.Fatalf("Failed to scale deployment %s to %d replicas: %v", deploymentName, replicas, err)
 	}
